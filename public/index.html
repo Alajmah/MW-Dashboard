@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MW Dashboard · Current Topology</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Middleware Operations</p>
+      <h1>Current Topology</h1>
+    </div>
+    <div id="snapshotBadge" class="badge">No active snapshot</div>
+  </header>
+
+  <main class="shell">
+    <section class="panel upload-panel">
+      <div>
+        <h2>Manual topology update</h2>
+        <p>Upload a normalized topology JSON snapshot. The current topology remains active unless validation and persistence complete successfully.</p>
+      </div>
+      <form id="uploadForm" class="upload-form">
+        <input id="topologyFile" type="file" accept="application/json,.json" required />
+        <button type="submit">Upload & activate</button>
+      </form>
+      <p id="uploadStatus" class="status-line" aria-live="polite"></p>
+    </section>
+
+    <section class="stats" id="stats"></section>
+
+    <section class="panel toolbar">
+      <div>
+        <h2>Topology</h2>
+        <p id="topologyMeta">Waiting for an active snapshot.</p>
+      </div>
+      <form id="searchForm" class="search-form">
+        <input id="searchInput" type="search" placeholder="Search host, application, queue, channel…" />
+        <button type="submit" class="secondary">Search</button>
+        <button id="clearSearch" type="button" class="ghost">Clear</button>
+      </form>
+    </section>
+
+    <section class="panel graph-panel">
+      <div id="emptyState" class="empty-state">Upload the first normalized topology snapshot to begin.</div>
+      <svg id="graph" role="img" aria-label="Current topology graph"></svg>
+    </section>
+
+    <section class="panel results-panel">
+      <div class="section-heading">
+        <h2 id="resultsTitle">Topology objects</h2>
+        <span id="resultCount"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Type</th><th>Name</th><th>Environment</th><th>Scope</th><th>Status</th></tr></thead>
+          <tbody id="resultRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
