@@ -13,17 +13,19 @@ Normalized topology JSON
         |
         v
 Cloudflare Worker
-   |             |
-   v             v
-  D1             R2
-searchable       snapshot evidence
-nodes/edges
+        |
+        v
+       D1
+  nodes / edges
+ snapshot evidence
         |
         v
 Current Topology UI
 ```
 
 The Cloudflare side never needs IBM MQ administrative connectivity in this phase. Server data is exported manually, normalized, and uploaded through the dashboard.
+
+R2 is intentionally optional in the first deployment. The current Cloudflare account has R2 disabled, so validated snapshot evidence is stored in a dedicated D1 table through a small compatibility adapter. When R2 is enabled later, the adapter can be replaced by a native R2 binding without changing the topology engine or normalized input contract.
 
 ## Safety invariant
 
@@ -33,7 +35,7 @@ A new upload does **not** replace the active topology until the complete graph h
 
 - Cloudflare Worker API and static dashboard in one deployment.
 - D1 current/snapshot topology store.
-- R2 evidence copy of every validated normalized snapshot.
+- D1 evidence copy of every validated normalized snapshot for V1.
 - Manual JSON upload and activation.
 - Current topology endpoint.
 - Search across topology names and metadata.
@@ -65,7 +67,7 @@ Then upload [`examples/sample-topology.json`](examples/sample-topology.json) fro
 
 ## Cloudflare deployment
 
-The project uses `wrangler.jsonc`, Workers static assets, D1, and R2 bindings. The initial configuration intentionally uses Wrangler automatic resource provisioning: D1 omits `database_id` and R2 omits `bucket_name`. On the first production deployment Wrangler can provision those resources.
+The project uses `wrangler.jsonc`, Workers static assets, and D1. Wrangler automatic provisioning is used for the D1 database named `mw-dashboard-topology`.
 
 ```bash
 npm install
@@ -74,9 +76,11 @@ npm run deploy
 npm run db:migrate
 ```
 
-After the D1 migration is applied, open the Worker URL and upload the sample topology or a real normalized export.
+GitHub Actions performs those deployment steps on pushes to `main` using repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
 
-For a controlled production setup, replace automatic provisioning with explicit resource IDs/names after the Cloudflare resources exist and protect the application with Cloudflare Access.
+After the D1 migrations are applied, open the Worker URL and upload the sample topology or a real normalized export.
+
+For a controlled production setup, pin the D1 resource ID after provisioning and protect the application with Cloudflare Access.
 
 ## Next milestone
 
