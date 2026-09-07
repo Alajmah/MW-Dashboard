@@ -16,7 +16,8 @@
   ],
   "r2_buckets": [
     {
-      "binding": "EVIDENCE"
+      "binding": "EVIDENCE",
+      "bucket_name": "mw-dashboard-evidence"
     }
   ]
 }
