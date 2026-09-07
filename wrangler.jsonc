@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "mw-dashboard",
-  "main": "./src/index.ts",
+  "main": "./src/bootstrap.ts",
   "compatibility_date": "2026-09-07",
   "assets": {
     "directory": "./public",
@@ -12,12 +12,6 @@
     {
       "binding": "DB",
       "database_name": "mw-dashboard-topology"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "EVIDENCE",
-      "bucket_name": "mw-dashboard-evidence"
     }
   ]
 }
