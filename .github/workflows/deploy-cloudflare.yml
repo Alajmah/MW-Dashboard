@@ -29,6 +29,20 @@ jobs:
       - name: Type check
         run: npm run check
 
+      - name: Ensure R2 evidence bucket exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          buckets="$(npx wrangler r2 bucket list)"
+          if printf '%s\n' "$buckets" | grep -Fq 'mw-dashboard-evidence'; then
+            echo 'R2 bucket mw-dashboard-evidence already exists.'
+          else
+            npx wrangler r2 bucket create mw-dashboard-evidence
+          fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Deploy Worker and provision bindings
         id: deploy
         uses: cloudflare/wrangler-action@v4
