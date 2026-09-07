@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "created_at": "2026-09-07T11:30:00Z",
+  "environment": "production",
+  "discovery": {
+    "collector": "manual-sample",
+    "collector_version": "0.1.0",
+    "source_host": "sample-host",
+    "notes": ["Synthetic topology used to test the Cloudflare import path."]
+  },
+  "nodes": [
+    {"id":"n_host_app01","type":"host","name":"APP01","environment":"production","scope":"global","metadata":{"ip":"10.10.10.21"}},
+    {"id":"n_app_payment","type":"application","name":"PAYMENT_APP","environment":"production","scope":"APP01","metadata":{}},
+    {"id":"n_channel_svrconn","type":"channel","name":"SVRCONN.PAYMENT","environment":"production","scope":"QM_EXT","metadata":{"channel_type":"SVRCONN"}},
+    {"id":"n_qmgr_ext","type":"qmgr","name":"QM_EXT","environment":"production","scope":"MQ_EXTERNAL","metadata":{}},
+    {"id":"n_queue_request","type":"queue","name":"PAYMENT.REQUEST","environment":"production","scope":"QM_EXT","metadata":{"queue_type":"QLOCAL"}},
+    {"id":"n_xmitq_ace","type":"queue","name":"QM_ACE.XMITQ","environment":"production","scope":"QM_EXT","metadata":{"queue_type":"XMITQ"}},
+    {"id":"n_sdr_ace","type":"channel","name":"QM_EXT.TO.QM_ACE","environment":"production","scope":"QM_EXT","metadata":{"channel_type":"SDR"}},
+    {"id":"n_qmgr_ace","type":"qmgr","name":"QM_ACE","environment":"production","scope":"MQ_ACE","metadata":{}}
+  ],
+  "edges": [
+    {"source":"n_host_app01","relationship":"RUNS","target":"n_app_payment","relationship_source":"observed","confidence":1,"evidence":"application runtime"},
+    {"source":"n_app_payment","relationship":"CONNECTS_VIA","target":"n_channel_svrconn","relationship_source":"observed","confidence":1,"evidence":"MQ connection"},
+    {"source":"n_channel_svrconn","relationship":"BELONGS_TO","target":"n_qmgr_ext","relationship_source":"configured","confidence":1,"evidence":"channel definition"},
+    {"source":"n_app_payment","relationship":"PUTS_TO","target":"n_queue_request","relationship_source":"observed","confidence":1,"evidence":"open output handle"},
+    {"source":"n_queue_request","relationship":"ROUTES_TO","target":"n_xmitq_ace","relationship_source":"configured","confidence":1,"evidence":"MQ routing configuration"},
+    {"source":"n_xmitq_ace","relationship":"SENT_BY","target":"n_sdr_ace","relationship_source":"configured","confidence":1,"evidence":"sender channel XMITQ"},
+    {"source":"n_sdr_ace","relationship":"CONNECTS_TO","target":"n_qmgr_ace","relationship_source":"configured","confidence":0.95,"evidence":"CONNAME and remote queue manager mapping"}
+  ]
+}
