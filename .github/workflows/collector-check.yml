@@ -1,0 +1,70 @@
+name: IBM MQ collector check
+
+on:
+  pull_request:
+    paths:
+      - "collectors/ibm-mq/**"
+      - "docs/mq-raw-collector-contract-v1.md"
+      - ".github/workflows/collector-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "collectors/ibm-mq/**"
+      - "docs/mq-raw-collector-contract-v1.md"
+      - ".github/workflows/collector-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Bash syntax check
+        run: bash -n collectors/ibm-mq/mq-topology-collector.sh
+
+      - name: Help path
+        run: bash collectors/ibm-mq/mq-topology-collector.sh --help >/dev/null
+
+      - name: Mocked archive integration test
+        shell: bash
+        run: |
+          set -euo pipefail
+          mockbin="$(mktemp -d)"
+          outdir="$(mktemp -d)"
+
+          cat > "$mockbin/dspmq" <<'EOF'
+          #!/usr/bin/env bash
+          echo 'QMNAME(QM_EXT) STATUS(Running)'
+          echo 'QMNAME(QM_INT) STATUS(Running elsewhere)'
+          EOF
+
+          cat > "$mockbin/runmqsc" <<'EOF'
+          #!/usr/bin/env bash
+          qmgr="$1"
+          echo "Starting MQSC for queue manager $qmgr."
+          cat
+          EOF
+
+          cat > "$mockbin/dspmqver" <<'EOF'
+          #!/usr/bin/env bash
+          echo 'Name: IBM MQ'
+          echo 'Version: 9.4.0.0'
+          EOF
+
+          chmod +x "$mockbin"/*
+          PATH="$mockbin:$PATH" bash collectors/ibm-mq/mq-topology-collector.sh 2 0 --output-dir "$outdir"
+
+          archive="$(find "$outdir" -maxdepth 1 -name 'mq-topology-*.tar.gz' -print -quit)"
+          test -n "$archive"
+
+          listing="$(tar -tzf "$archive")"
+          grep -q 'manifest.properties' <<<"$listing"
+          grep -q 'qmgrs.tsv' <<<"$listing"
+          grep -q 'qmgr/001_QM_EXT/config/channels.out' <<<"$listing"
+          grep -q 'runtime/sample_001_.*connections.out' <<<"$listing"
+          grep -q 'runtime/sample_002_.*connection-handles.out' <<<"$listing"
