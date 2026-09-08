@@ -4,182 +4,175 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="color-scheme" content="dark" />
-  <title>MW Dashboard · Middleware Topology</title>
+  <title>MW Dashboard · Topology Explorer</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand-block">
-      <div class="brand-mark" aria-hidden="true">MW</div>
-      <div>
-        <p class="eyebrow">Middleware Operations</p>
-        <h1>Topology Explorer</h1>
-        <p class="page-subtitle">Trace applications, queue managers, queues, channels and remote endpoints from the active topology snapshot.</p>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">MW</div>
+        <div><strong>MW Dashboard</strong><span>Middleware Operations</span></div>
       </div>
-    </div>
-    <div class="topbar-actions">
-      <div class="snapshot-state">
-        <span class="status-dot" aria-hidden="true"></span>
+      <nav class="nav" aria-label="Primary navigation">
+        <button class="nav-item active" data-view="overview">Overview</button>
+        <button class="nav-item" data-view="servers">Servers</button>
+        <button class="nav-item" data-view="middleware">Middleware</button>
+        <button class="nav-item" data-view="applications">Applications</button>
+        <button class="nav-item" data-view="routes">Routes</button>
+        <button class="nav-item" data-view="inventory">Inventory</button>
+        <button class="nav-item" data-view="snapshots">Snapshots</button>
+        <button class="nav-item" data-view="administration">Administration</button>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="status-dot"></span>
+        <div><small>Active snapshot</small><strong id="sidebarSnapshot">None</strong></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
         <div>
-          <span class="snapshot-label">Active snapshot</span>
-          <strong id="snapshotBadge">No active snapshot</strong>
+          <p class="eyebrow">Topology Explorer v2</p>
+          <h1 id="pageTitle">Overview</h1>
+          <p id="pageSubtitle">Operational view of physical placement, logical ownership and middleware relationships.</p>
         </div>
-      </div>
-      <button id="jumpImport" class="secondary compact" type="button">Import snapshot</button>
-    </div>
-  </header>
+        <div class="top-actions">
+          <div class="snapshot-chip"><span>Snapshot</span><strong id="snapshotBadge">No active snapshot</strong><small id="snapshotAge"></small></div>
+          <button id="jumpInventory" class="secondary" type="button">Search inventory</button>
+        </div>
+      </header>
 
-  <main class="shell">
-    <section class="stats" id="stats" aria-label="Topology summary"></section>
+      <div id="globalMessage" class="global-message" hidden></div>
 
-    <section class="panel explorer-panel">
-      <div class="panel-heading explorer-heading">
-        <div>
-          <div class="heading-line">
-            <h2>Current topology</h2>
-            <span id="filteredCount" class="count-badge">0 objects</span>
+      <section id="view-overview" class="view active" data-view-panel="overview">
+        <div id="overviewStats" class="stats"></div>
+        <section class="section-block">
+          <div class="section-heading">
+            <div><p class="section-kicker">Physical placement</p><h2>Servers and observed workloads</h2><p>Physical systems are shown separately from logical middleware ownership.</p></div>
+            <button class="ghost" data-go="servers">Open servers</button>
           </div>
-          <p id="topologyMeta">Waiting for an active snapshot.</p>
+          <div id="overviewHosts" class="card-grid"></div>
+        </section>
+        <section class="section-block">
+          <div class="section-heading">
+            <div><p class="section-kicker">Logical ownership</p><h2>Queue manager estate</h2><p>Queues, channels and listeners roll up to their owning queue manager instead of being drawn individually.</p></div>
+            <button class="ghost" data-go="middleware">Open middleware</button>
+          </div>
+          <div id="overviewQmgrs" class="card-grid"></div>
+        </section>
+        <section class="section-block two-col">
+          <div class="panel">
+            <div class="section-heading compact-heading"><div><p class="section-kicker">Coverage</p><h2>Evidence model</h2></div></div>
+            <div id="evidenceSummary" class="evidence-summary"></div>
+          </div>
+          <div class="panel">
+            <div class="section-heading compact-heading"><div><p class="section-kicker">Placement gaps</p><h2>Unresolved infrastructure</h2></div></div>
+            <div id="placementGaps" class="gap-list"></div>
+          </div>
+        </section>
+      </section>
+
+      <section id="view-servers" class="view" data-view-panel="servers">
+        <div class="toolbar panel">
+          <label class="search-box"><span>Search servers</span><input id="serverSearch" type="search" placeholder="Hostname, IP, application..." /></label>
+          <div id="serverCount" class="toolbar-count"></div>
         </div>
-        <div class="legend" aria-label="Relationship evidence legend">
-          <span><i class="legend-line observed"></i>Observed</span>
-          <span><i class="legend-line configured"></i>Configured</span>
-          <span><i class="legend-line inferred"></i>Inferred</span>
+        <div id="serversGrid" class="server-grid"></div>
+      </section>
+
+      <section id="view-middleware" class="view" data-view-panel="middleware">
+        <div class="toolbar panel">
+          <label class="search-box"><span>Search queue managers</span><input id="middlewareSearch" type="search" placeholder="Queue manager, cluster, host..." /></label>
+          <label class="select-box"><span>Placement</span><select id="middlewarePlacement"><option value="">All</option><option value="local">Observed locally</option><option value="remote">Remote / unresolved</option></select></label>
+          <div id="middlewareCount" class="toolbar-count"></div>
         </div>
-      </div>
+        <div id="qmgrGrid" class="qmgr-grid"></div>
+      </section>
 
-      <div class="filterbar" aria-label="Topology filters">
-        <label class="search-field">
-          <span class="sr-only">Search topology</span>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z"/></svg>
-          <input id="searchInput" type="search" autocomplete="off" placeholder="Search host, application, queue, channel, IP…" />
-        </label>
-
-        <label class="select-field">
-          <span>Type</span>
-          <select id="typeFilter"><option value="">All object types</option></select>
-        </label>
-
-        <div class="evidence-filters" role="group" aria-label="Relationship evidence filters">
-          <label class="evidence-toggle"><input id="showObserved" type="checkbox" checked /><span class="evidence-swatch observed"></span>Observed</label>
-          <label class="evidence-toggle"><input id="showConfigured" type="checkbox" checked /><span class="evidence-swatch configured"></span>Configured</label>
-          <label class="evidence-toggle"><input id="showInferred" type="checkbox" checked /><span class="evidence-swatch inferred"></span>Inferred</label>
+      <section id="view-applications" class="view" data-view-panel="applications">
+        <div class="toolbar panel">
+          <label class="search-box"><span>Search applications</span><input id="applicationSearch" type="search" placeholder="Application, client IP, queue manager..." /></label>
+          <div id="applicationCount" class="toolbar-count"></div>
         </div>
+        <div id="applicationsGrid" class="app-grid"></div>
+      </section>
 
-        <button id="clearFilters" type="button" class="ghost compact">Reset</button>
-      </div>
-
-      <div class="graph-toolbar">
-        <div>
-          <strong id="graphTitle">Topology overview</strong>
-          <span id="graphHint">Select an object to inspect its neighborhood.</span>
-        </div>
-        <div class="graph-actions">
-          <button id="showOverview" type="button" class="ghost compact" hidden>Back to overview</button>
-          <span id="graphLimit" class="quiet"></span>
-        </div>
-      </div>
-
-      <div class="graph-wrap">
-        <div id="emptyState" class="empty-state">
-          <strong>No active topology yet</strong>
-          <span>Import a normalized topology snapshot to begin exploring middleware relationships.</span>
-        </div>
-        <svg id="graph" role="img" aria-label="Current middleware topology"></svg>
-      </div>
-    </section>
-
-    <section class="workspace-grid">
-      <section class="panel results-panel">
-        <div class="section-heading">
+      <section id="view-routes" class="view" data-view-panel="routes">
+        <section class="route-builder panel">
           <div>
-            <h2 id="resultsTitle">Topology objects</h2>
-            <p id="resultsSubtitle">Select a row to inspect relationships and metadata.</p>
+            <p class="section-kicker">End-to-end trace</p>
+            <h2>Find a message path</h2>
+            <p>Trace only message-flow relationships supported by the current evidence. Ownership edges are intentionally excluded from route calculation.</p>
           </div>
-          <span id="resultCount"></span>
+          <form id="routeForm" class="route-form">
+            <label><span>From</span><input id="routeFrom" list="routeObjects" autocomplete="off" placeholder="Application or queue..." required /></label>
+            <div class="route-arrow">→</div>
+            <label><span>To</span><input id="routeTo" list="routeObjects" autocomplete="off" placeholder="Queue, application or queue manager..." required /></label>
+            <button type="submit">Trace route</button>
+            <datalist id="routeObjects"></datalist>
+          </form>
+        </section>
+        <section class="panel route-results">
+          <div class="section-heading compact-heading"><div><p class="section-kicker">Evidence path</p><h2 id="routeTitle">No route selected</h2></div><span id="routeMeta"></span></div>
+          <div id="routeResult" class="route-empty">Choose a source and destination to trace the shortest supported directed path.</div>
+        </section>
+      </section>
+
+      <section id="view-inventory" class="view" data-view-panel="inventory">
+        <div class="toolbar panel inventory-toolbar">
+          <label class="search-box"><span>Search inventory</span><input id="inventorySearch" type="search" placeholder="Name, IP, scope, metadata..." /></label>
+          <label class="select-box"><span>Type</span><select id="inventoryType"><option value="">All types</option></select></label>
+          <label class="select-box"><span>Server</span><select id="inventoryServer"><option value="">All servers</option></select></label>
+          <label class="select-box"><span>Logical owner</span><select id="inventoryOwner"><option value="">All owners</option></select></label>
+          <button id="inventoryReset" class="ghost" type="button">Reset</button>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Type</th><th>Name</th><th>Environment</th><th>Scope</th><th>Status</th></tr></thead>
-            <tbody id="resultRows"></tbody>
-          </table>
+        <div class="inventory-layout">
+          <section class="panel inventory-panel">
+            <div class="section-heading compact-heading"><div><h2>Objects</h2><p id="inventoryCount"></p></div></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Type</th><th>Name</th><th>Logical owner</th><th>Current / observed server</th><th>Status</th></tr></thead>
+                <tbody id="inventoryRows"></tbody>
+              </table>
+            </div>
+          </section>
+          <aside class="panel object-detail">
+            <div id="detailEmpty" class="detail-empty"><span>↗</span><h2>Object details</h2><p>Select an inventory row to inspect ownership, placement, evidence and relationships.</p></div>
+            <div id="detailContent" hidden>
+              <div class="detail-head"><div><span id="detailType" class="pill"></span><h2 id="detailName"></h2><p id="detailScope"></p></div><button id="closeDetail" class="icon-button" type="button">×</button></div>
+              <div id="detailFacts" class="fact-grid"></div>
+              <div class="detail-section"><h3>Relationships</h3><div id="detailRelationships" class="relationship-list"></div></div>
+              <div class="detail-section"><h3>Metadata</h3><dl id="detailMetadata" class="metadata-list"></dl></div>
+            </div>
+          </aside>
         </div>
       </section>
 
-      <aside class="panel detail-panel" aria-live="polite">
-        <div id="detailEmpty" class="detail-empty">
-          <div class="detail-icon" aria-hidden="true">↗</div>
-          <h2>Object details</h2>
-          <p>Select a node from the graph or table to inspect its metadata and connected relationships.</p>
-        </div>
-        <div id="detailContent" hidden>
-          <div class="detail-heading">
-            <div>
-              <span id="detailType" class="type-pill"></span>
-              <h2 id="detailName"></h2>
-              <p id="detailContext"></p>
-            </div>
-            <button id="closeDetail" class="icon-button" type="button" aria-label="Close object details">×</button>
-          </div>
-          <div id="detailFacts" class="fact-grid"></div>
-          <div class="detail-section">
-            <div class="detail-section-heading">
-              <h3>Relationships</h3>
-              <span id="relationshipCount"></span>
-            </div>
-            <div id="relationshipList" class="relationship-list"></div>
-          </div>
-          <div class="detail-section">
-            <h3>Metadata</h3>
-            <dl id="metadataList" class="metadata-list"></dl>
-          </div>
-        </div>
-      </aside>
-    </section>
+      <section id="view-snapshots" class="view" data-view-panel="snapshots">
+        <section class="panel">
+          <div class="section-heading"><div><p class="section-kicker">Discovery history</p><h2>Topology snapshots</h2><p>Current and previous imports retained for traceability.</p></div><span id="snapshotCount"></span></div>
+          <div id="snapshotList" class="snapshot-list"></div>
+        </section>
+      </section>
 
-    <section class="panel snapshots-panel">
-      <div class="section-heading">
-        <div>
-          <h2>Snapshot history</h2>
-          <p>Recent imports retained for traceability and rollback planning.</p>
-        </div>
-        <span id="snapshotCount"></span>
-      </div>
-      <div id="snapshotList" class="snapshot-list"><div class="skeleton-row"></div></div>
-    </section>
-
-    <details id="importSection" class="panel import-panel">
-      <summary>
-        <div>
-          <span class="summary-kicker">Administration</span>
-          <strong>Import topology snapshot</strong>
-          <small>Manual update · active topology is preserved if validation fails</small>
-        </div>
-        <span class="summary-action">Open</span>
-      </summary>
-      <div class="import-body">
-        <div>
-          <h2>Manual topology update</h2>
-          <p>Upload a normalized topology JSON file. The server validates the graph, persists it, verifies counts, and only then activates the new snapshot.</p>
-          <ul class="safety-list">
-            <li>Existing topology remains active on failure.</li>
-            <li>Node and relationship IDs are validated before activation.</li>
-            <li>Use the IBM MQ normalizer output, not the raw collector archive.</li>
-          </ul>
-        </div>
-        <form id="uploadForm" class="upload-form">
-          <label class="file-drop" for="topologyFile">
-            <input id="topologyFile" type="file" accept="application/json,.json" required />
-            <span class="file-drop-title">Choose normalized topology JSON</span>
-            <span id="fileHint">No file selected</span>
-          </label>
-          <button id="uploadButton" type="submit">Validate, import & activate</button>
-          <p id="uploadStatus" class="status-line" aria-live="polite"></p>
-        </form>
-      </div>
-    </details>
-  </main>
-
+      <section id="view-administration" class="view" data-view-panel="administration">
+        <section class="admin-grid">
+          <div class="panel admin-copy">
+            <p class="section-kicker">Manual ingestion</p>
+            <h2>Import normalized topology</h2>
+            <p>Upload the normalizer output JSON, not the raw collector archive. The existing topology remains active until validation, persistence and count verification all succeed.</p>
+            <ul><li>Validated before activation</li><li>Previous snapshot preserved on failure</li><li>Raw discovery and normalization remain separate</li></ul>
+          </div>
+          <form id="uploadForm" class="panel upload-card">
+            <label class="file-drop" for="topologyFile"><input id="topologyFile" type="file" accept="application/json,.json" required /><strong>Choose normalized topology JSON</strong><span id="fileHint">No file selected</span></label>
+            <button id="uploadButton" type="submit">Validate, import & activate</button>
+            <p id="uploadStatus" class="status-line" aria-live="polite"></p>
+          </form>
+        </section>
+      </section>
+    </main>
+  </div>
   <script src="/app.js" type="module"></script>
 </body>
 </html>
