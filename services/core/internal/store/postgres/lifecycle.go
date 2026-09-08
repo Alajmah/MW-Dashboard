@@ -9,6 +9,32 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+func coverageClosesAbsence(coverage domain.Coverage) (bool, string) {
+	if coverage.Mode == "complete" {
+		return true, "absent_from_complete_coverage"
+	}
+	if coverage.Mode == "point_in_time" {
+		if value, ok := coverage.Properties["absence_closes_assertions"].(bool); ok && value {
+			return true, "absent_from_point_in_time_enumeration"
+		}
+	}
+	return false, ""
+}
+
+func coverageScopeSQL(scopeType string, subject string) (string, bool) {
+	switch scopeType {
+	case "source":
+		return "", true
+	case "queue_manager":
+		if subject == "entity" {
+			return " AND lower(COALESCE(entity.attributes->>'queue_manager',''))=lower($8)", true
+		}
+		return " AND lower(COALESCE(relation.attributes->>'queue_manager',''))=lower($8)", true
+	default:
+		return "", false
+	}
+}
+
 func reconcileAssertionLifecycle(ctx context.Context, tx pgx.Tx, bundle domain.ObservationBundle) (int, error) {
 	closed := 0
 
@@ -38,18 +64,23 @@ func reconcileAssertionLifecycle(ctx context.Context, tx pgx.Tx, bundle domain.O
 	closed += int(result.RowsAffected())
 
 	for _, coverage := range bundle.Coverage {
-		if coverage.Mode != "complete" || coverage.ScopeType != "source" {
+		closes, closeReason := coverageClosesAbsence(coverage)
+		if !closes {
 			continue
 		}
-		if coverage.ScopeKey != "" && coverage.ScopeKey != bundle.Run.Source.ID && coverage.ScopeKey != bundle.Run.Source.DisplayName {
+		if coverage.ScopeType == "source" && coverage.ScopeKey != "" && coverage.ScopeKey != bundle.Run.Source.ID && coverage.ScopeKey != bundle.Run.Source.DisplayName {
 			continue
 		}
 		if strings.HasPrefix(coverage.ObjectClass, "relation:") {
+			scopeSQL, supported := coverageScopeSQL(coverage.ScopeType, "relation")
+			if !supported {
+				continue
+			}
 			relationType := strings.TrimPrefix(coverage.ObjectClass, "relation:")
-			result, err = tx.Exec(ctx, `
+			query := `
 				UPDATE semantic_assertion previous
 				SET valid_to=$1,
-				    properties=previous.properties || jsonb_build_object('closed_reason','absent_from_complete_coverage','closed_by_run_id',$2,'coverage_object_class',$6)
+				    properties=previous.properties || jsonb_build_object('closed_reason',$9,'closed_by_run_id',$2,'coverage_object_class',$6,'coverage_scope_type',$7,'coverage_scope_key',$8)
 				FROM source_run previous_run, canonical_relation relation
 				WHERE previous.source_run_id=previous_run.run_id
 				  AND previous.relation_id=relation.relation_id
@@ -60,13 +91,19 @@ func reconcileAssertionLifecycle(ctx context.Context, tx pgx.Tx, bundle domain.O
 				  AND previous_run.source_kind=$4
 				  AND previous_run.source_id=$5
 				  AND previous_run.completed_at <= $1
-				  AND relation.relationship_type=$7`,
-				bundle.Run.CompletedAt, bundle.Run.RunID, bundle.Run.Environment, bundle.Run.Source.Kind, bundle.Run.Source.ID, coverage.ObjectClass, relationType)
+				  AND relation.relationship_type=$10` + scopeSQL
+			result, err = tx.Exec(ctx, query,
+				bundle.Run.CompletedAt, bundle.Run.RunID, bundle.Run.Environment, bundle.Run.Source.Kind, bundle.Run.Source.ID,
+				coverage.ObjectClass, coverage.ScopeType, coverage.ScopeKey, closeReason, relationType)
 		} else {
-			result, err = tx.Exec(ctx, `
+			scopeSQL, supported := coverageScopeSQL(coverage.ScopeType, "entity")
+			if !supported {
+				continue
+			}
+			query := `
 				UPDATE semantic_assertion previous
 				SET valid_to=$1,
-				    properties=previous.properties || jsonb_build_object('closed_reason','absent_from_complete_coverage','closed_by_run_id',$2,'coverage_object_class',$6)
+				    properties=previous.properties || jsonb_build_object('closed_reason',$9,'closed_by_run_id',$2,'coverage_object_class',$6,'coverage_scope_type',$7,'coverage_scope_key',$8)
 				FROM source_run previous_run, canonical_entity entity
 				WHERE previous.source_run_id=previous_run.run_id
 				  AND previous.entity_id=entity.entity_id
@@ -77,11 +114,13 @@ func reconcileAssertionLifecycle(ctx context.Context, tx pgx.Tx, bundle domain.O
 				  AND previous_run.source_kind=$4
 				  AND previous_run.source_id=$5
 				  AND previous_run.completed_at <= $1
-				  AND entity.entity_type=$6`,
-				bundle.Run.CompletedAt, bundle.Run.RunID, bundle.Run.Environment, bundle.Run.Source.Kind, bundle.Run.Source.ID, coverage.ObjectClass)
+				  AND entity.entity_type=$6` + scopeSQL
+			result, err = tx.Exec(ctx, query,
+				bundle.Run.CompletedAt, bundle.Run.RunID, bundle.Run.Environment, bundle.Run.Source.Kind, bundle.Run.Source.ID,
+				coverage.ObjectClass, coverage.ScopeType, coverage.ScopeKey, closeReason)
 		}
 		if err != nil {
-			return closed, fmt.Errorf("apply complete coverage %s: %w", coverage.ObjectClass, err)
+			return closed, fmt.Errorf("apply coverage %s/%s/%s: %w", coverage.ScopeType, coverage.ScopeKey, coverage.ObjectClass, err)
 		}
 		closed += int(result.RowsAffected())
 	}
