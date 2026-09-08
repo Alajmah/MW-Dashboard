@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -164,5 +163,3 @@ func activeRelationAssertions(t *testing.T, repo *Repository, ctx context.Contex
 	}
 	return count
 }
-
-var _ = strings.TrimSpace
