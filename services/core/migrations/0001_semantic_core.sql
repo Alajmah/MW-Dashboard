@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS canonical_entity (
   entity_type TEXT NOT NULL,
   environment TEXT NOT NULL,
   logical_key TEXT NOT NULL,
+  identity_rule TEXT,
+  identity_strength INTEGER NOT NULL DEFAULT 0 CHECK (identity_strength >= 0),
   display_name TEXT NOT NULL,
   status TEXT,
   attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -56,6 +58,7 @@ CREATE TABLE IF NOT EXISTS canonical_entity (
 CREATE INDEX IF NOT EXISTS idx_entity_type_env ON canonical_entity(environment, entity_type, display_name);
 CREATE INDEX IF NOT EXISTS idx_entity_attributes_gin ON canonical_entity USING gin(attributes);
 CREATE INDEX IF NOT EXISTS idx_entity_name_trgm ON canonical_entity USING gin(display_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_entity_identity_rule ON canonical_entity(environment, entity_type, identity_rule, identity_strength DESC);
 
 CREATE TABLE IF NOT EXISTS entity_alias (
   entity_id TEXT NOT NULL REFERENCES canonical_entity(entity_id) ON DELETE CASCADE,
@@ -131,6 +134,7 @@ CREATE TABLE IF NOT EXISTS semantic_assertion (
 CREATE INDEX IF NOT EXISTS idx_assertion_entity_active ON semantic_assertion(entity_id, valid_to, observed_at DESC) WHERE subject_kind='entity';
 CREATE INDEX IF NOT EXISTS idx_assertion_relation_active ON semantic_assertion(relation_id, valid_to, observed_at DESC) WHERE subject_kind='relation';
 CREATE INDEX IF NOT EXISTS idx_assertion_run ON semantic_assertion(source_run_id);
+CREATE INDEX IF NOT EXISTS idx_assertion_active_run ON semantic_assertion(source_run_id, subject_kind, valid_to);
 
 CREATE TABLE IF NOT EXISTS unresolved_reference (
   reference_id TEXT PRIMARY KEY,
@@ -152,6 +156,24 @@ CREATE TABLE IF NOT EXISTS unresolved_reference (
 CREATE INDEX IF NOT EXISTS idx_unresolved_state ON unresolved_reference(resolution_state, expected_target_type);
 CREATE INDEX IF NOT EXISTS idx_unresolved_source ON unresolved_reference(source_entity_id, observed_at DESC);
 
+CREATE TABLE IF NOT EXISTS identity_conflict (
+  conflict_id TEXT PRIMARY KEY,
+  source_run_id TEXT NOT NULL REFERENCES source_run(run_id) ON DELETE CASCADE,
+  local_ref TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  environment TEXT NOT NULL,
+  identity_hints JSONB NOT NULL DEFAULT '{}'::jsonb,
+  candidate_entity_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  conflict_entity_id TEXT REFERENCES canonical_entity(entity_id) ON DELETE SET NULL,
+  state TEXT NOT NULL DEFAULT 'OPEN' CHECK (state IN ('OPEN','RESOLVED','DISMISSED')),
+  resolution_note TEXT,
+  resolved_entity_id TEXT REFERENCES canonical_entity(entity_id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ,
+  UNIQUE (source_run_id, local_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_identity_conflict_open ON identity_conflict(environment, entity_type, created_at DESC) WHERE state='OPEN';
+
 CREATE TABLE IF NOT EXISTS topology_revision (
   revision_id TEXT PRIMARY KEY,
   environment TEXT NOT NULL,
@@ -164,5 +186,6 @@ CREATE TABLE IF NOT EXISTS topology_revision (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 CREATE INDEX IF NOT EXISTS idx_revision_env_time ON topology_revision(environment, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_topology_revision_graph_per_run ON topology_revision(environment, source_run_id, graph_hash) WHERE source_run_id IS NOT NULL;
 
 COMMIT;
