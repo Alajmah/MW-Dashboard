@@ -23,7 +23,11 @@ jobs:
         uses: actions/checkout@v6
 
       - name: JavaScript syntax
-        run: node --check public/app.js
+        run: |
+          for file in public/*.js; do
+            echo "Checking $file"
+            node --check "$file"
+          done
 
       - name: DOM contract
         shell: python
@@ -42,7 +46,7 @@ jobs:
                       self.ids.append(attrs["id"])
 
           html = Path("public/index.html").read_text()
-          js = Path("public/app.js").read_text()
+          js = "\n".join(path.read_text() for path in Path("public").glob("*.js"))
           parser = IDs()
           parser.feed(html)
 
@@ -51,9 +55,9 @@ jobs:
               raise SystemExit(f"duplicate HTML ids: {duplicates}")
 
           html_ids = set(parser.ids)
-          referenced = set(re.findall(r'\$\("([A-Za-z0-9_-]+)"\)', js))
+          referenced = set(re.findall(r'(?:\$|rq)\("([A-Za-z0-9_-]+)"\)', js))
           missing = sorted(referenced - html_ids)
           if missing:
               raise SystemExit(f"JavaScript references missing HTML ids: {missing}")
 
-          print(f"DOM contract OK: {len(html_ids)} ids, {len(referenced)} referenced by app.js")
+          print(f"DOM contract OK: {len(html_ids)} ids, {len(referenced)} referenced by frontend modules")
