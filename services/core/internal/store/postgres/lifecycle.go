@@ -35,7 +35,7 @@ func coverageScopeSQL(scopeType string, subject string) (string, bool) {
 	}
 }
 
-func coverageEndpointType(coverage domain.Coverage, key string) string {
+func coveragePropertyString(coverage domain.Coverage, key string) string {
 	if coverage.Properties == nil {
 		return ""
 	}
@@ -87,9 +87,12 @@ func reconcileAssertionLifecycle(ctx context.Context, tx pgx.Tx, bundle domain.O
 			if !supported {
 				continue
 			}
-			relationType := strings.TrimPrefix(coverage.ObjectClass, "relation:")
-			targetType := coverageEndpointType(coverage, "target_type")
-			sourceType := coverageEndpointType(coverage, "source_type")
+			relationType := coveragePropertyString(coverage, "relationship_type")
+			if relationType == "" {
+				relationType = strings.TrimPrefix(coverage.ObjectClass, "relation:")
+			}
+			targetType := coveragePropertyString(coverage, "target_type")
+			sourceType := coveragePropertyString(coverage, "source_type")
 			query := `
 				UPDATE semantic_assertion previous
 				SET valid_to=$1,
@@ -99,6 +102,7 @@ func reconcileAssertionLifecycle(ctx context.Context, tx pgx.Tx, bundle domain.O
 				      'coverage_object_class',$6::text,
 				      'coverage_scope_type',$7::text,
 				      'coverage_scope_key',$8::text,
+				      'coverage_relationship_type',$10::text,
 				      'coverage_target_type',NULLIF($11::text,''),
 				      'coverage_source_type',NULLIF($12::text,''))
 				FROM source_run previous_run, canonical_relation relation
