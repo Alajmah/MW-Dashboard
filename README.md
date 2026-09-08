@@ -9,6 +9,12 @@ Private middleware servers
         |
         | manual export / transfer (initially)
         v
+Raw collector archives
+        |
+        v
+Normalization adapter
+        |
+        v
 Normalized topology JSON
         |
         v
@@ -43,6 +49,34 @@ A new upload does **not** replace the active topology until the complete graph h
 - Snapshot inventory.
 - Relationship provenance: `observed`, `configured`, `inferred`.
 - Basic topology graph and object table in the browser.
+- Read-only IBM MQ raw topology collector with repeatable runtime sampling.
+
+## IBM MQ collection
+
+The supported server-side collector is:
+
+[`collectors/ibm-mq/mq-topology-collector.sh`](collectors/ibm-mq/mq-topology-collector.sh)
+
+For the first real collection on an MQ host:
+
+```bash
+chmod 750 mq-topology-collector.sh
+./mq-topology-collector.sh 5 60
+```
+
+That records static queue-manager configuration once and five runtime observations one minute apart, then creates:
+
+```text
+mq-topology-<hostname>-<UTC timestamp>.tar.gz
+```
+
+The collector is read-only and does not read message payloads. Configuration and runtime evidence are kept separate so the normalization adapter can distinguish configured relationships from observed application activity.
+
+See:
+
+- [`collectors/ibm-mq/README.md`](collectors/ibm-mq/README.md) for installation and usage.
+- [`docs/mq-raw-collector-contract-v1.md`](docs/mq-raw-collector-contract-v1.md) for the archive/evidence contract.
+- [`docs/topology-contract-v1.md`](docs/topology-contract-v1.md) for the normalized dashboard input contract.
 
 ## API
 
@@ -52,8 +86,6 @@ A new upload does **not** replace the active topology until the complete graph h
 - `GET /api/v1/topology/subgraph/{node_id}?depth=2`
 - `GET /api/v1/snapshots`
 - `POST /api/v1/topology/import` (`application/json`)
-
-See [`docs/topology-contract-v1.md`](docs/topology-contract-v1.md) for the normalized input contract.
 
 ## Local development
 
@@ -76,7 +108,7 @@ npm run deploy
 npm run db:migrate
 ```
 
-GitHub Actions performs those deployment steps on pushes to `main` using repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+GitHub Actions performs those deployment steps on pushes to `main` using repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` and runs a post-deploy `/health` smoke test.
 
 After the D1 migrations are applied, open the Worker URL and upload the sample topology or a real normalized export.
 
@@ -84,6 +116,6 @@ For a controlled production setup, pin the D1 resource ID after provisioning and
 
 ## Next milestone
 
-Build the IBM MQ normalization adapter from a real collector export and reproduce this path from evidence:
+Run the new IBM MQ collector on a real MQ host, inspect the resulting raw archive, and build the normalization adapter to reproduce this path from evidence:
 
 `Host -> Application -> SVRCONN -> Queue -> Consumer or XMITQ/Sender Channel -> Remote Queue Manager -> Destination`
