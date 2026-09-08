@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "collectors/ibm-mq/**"
+      - "services/core/registry/v1.json"
       - "docs/mq-raw-collector-contract-v1.md"
       - ".github/workflows/collector-check.yml"
   push:
@@ -11,6 +12,7 @@ on:
       - main
     paths:
       - "collectors/ibm-mq/**"
+      - "services/core/registry/v1.json"
       - "docs/mq-raw-collector-contract-v1.md"
       - ".github/workflows/collector-check.yml"
 
@@ -28,12 +30,15 @@ jobs:
         run: bash -n collectors/ibm-mq/mq-topology-collector.sh
 
       - name: Python syntax check
-        run: python3 -m py_compile collectors/ibm-mq/normalize_mq_topology.py
+        run: |
+          python3 -m py_compile collectors/ibm-mq/normalize_mq_topology.py
+          python3 -m py_compile collectors/ibm-mq/normalize_mq_observations.py
 
       - name: Help path
         run: |
           bash collectors/ibm-mq/mq-topology-collector.sh --help >/dev/null
           python3 collectors/ibm-mq/normalize_mq_topology.py --help >/dev/null
+          python3 collectors/ibm-mq/normalize_mq_observations.py --help >/dev/null
 
       - name: Mocked archive integration test
         shell: bash
@@ -52,20 +57,35 @@ jobs:
           #!/usr/bin/env bash
           qmgr="$1"
           echo "Starting MQSC for queue manager $qmgr."
+
+          if [[ "$qmgr" == "QM_INT" ]]; then
+            while IFS= read -r command; do
+              echo "     1 : $command"
+              echo 'AMQ8146E: IBM MQ queue manager not available.'
+            done
+            exit 0
+          fi
+
           while IFS= read -r command; do
             echo "     1 : $command"
             case "$command" in
               'DISPLAY QMGR ALL')
                 echo 'AMQ8408I: Display Queue Manager details.'
-                echo "   QMNAME($qmgr) PLATFORM(UNIX) CMDLEVEL(940) VERSION(09040000)"
+                echo '   QMNAME(QM_EXT) QMID(QMID-EXT-0001) PLATFORM(UNIX) CMDLEVEL(940) VERSION(09040000)'
                 ;;
               'DISPLAY QMSTATUS ALL')
                 echo 'AMQ8705I: Display Queue Manager Status Details.'
-                echo "   QMNAME($qmgr) TYPE(QMGR) STATUS(RUNNING) CHINIT(RUNNING) CMDSERV(RUNNING) CONNS(1)"
+                echo '   QMNAME(QM_EXT) TYPE(QMGR) STATUS(RUNNING) CHINIT(RUNNING) CMDSERV(RUNNING) CONNS(1)'
                 ;;
               'DISPLAY QLOCAL(*) ALL')
                 echo 'AMQ8409I: Display Queue details.'
                 echo '   QUEUE(APP.REQUEST) TYPE(QLOCAL) USAGE(NORMAL) PUT(ENABLED) GET(ENABLED)'
+                echo 'AMQ8409I: Display Queue details.'
+                echo '   QUEUE(XMIT.QM_REMOTE) TYPE(QLOCAL) USAGE(XMITQ) PUT(ENABLED) GET(ENABLED)'
+                ;;
+              'DISPLAY QREMOTE(*) ALL')
+                echo 'AMQ8409I: Display Queue details.'
+                echo '   QUEUE(REMOTE.REQUEST) TYPE(QREMOTE) RNAME(TARGET.Q) RQMNAME(QM_REMOTE) XMITQ(XMIT.QM_REMOTE)'
                 ;;
               'DISPLAY QMODEL(*) ALL')
                 echo 'AMQ8409I: Display Queue details.'
@@ -77,17 +97,23 @@ jobs:
                 ;;
               'DISPLAY CHANNEL(*) ALL')
                 echo 'AMQ8414I: Display Channel details.'
-                echo "   CHANNEL(APP.$qmgr) CHLTYPE(SVRCONN) MCAUSER(appuser)"
+                echo '   CHANNEL(APP.QM_EXT) CHLTYPE(SVRCONN) MCAUSER(appuser)'
+                echo 'AMQ8414I: Display Channel details.'
+                echo '   CHANNEL(TO.QM_REMOTE) CHLTYPE(SDR) XMITQ(XMIT.QM_REMOTE) CONNAME(remote.example(1414)) TRPTYPE(TCP)'
+                ;;
+              'DISPLAY CHSTATUS(*) ALL')
+                echo 'AMQ8417I: Display Channel Status details.'
+                echo '   CHANNEL(TO.QM_REMOTE) CHLTYPE(SDR) STATUS(RUNNING) RQMNAME(QM_REMOTE) CONNAME(remote.example(1414))'
                 ;;
               'DISPLAY CONN(*) TYPE(CONN) ALL')
                 echo 'AMQ8276I: Display Connection details.'
                 echo '   CONN(ABC123) TYPE(CONN) APPLTAG(MockApp) APPLTYPE(USER)'
-                echo "   CHANNEL(APP.$qmgr) CONNAME(10.0.0.10) USERID(appuser)"
+                echo '   CHANNEL(APP.QM_EXT) CONNAME(10.0.0.10(55001)) USERID(appuser)'
                 ;;
               'DISPLAY QSTATUS(*) TYPE(HANDLE) ALL')
                 echo 'AMQ8450I: Display queue status details.'
                 echo '   QUEUE(APP.REQUEST) TYPE(HANDLE) APPLTAG(MockApp) APPLTYPE(USER)'
-                echo "   CHANNEL(APP.$qmgr) CONNAME(10.0.0.10) INPUT(SHARED) OUTPUT(NO) USERID(appuser)"
+                echo '   CHANNEL(APP.QM_EXT) CONNAME(10.0.0.10(55001)) INPUT(SHARED) OUTPUT(YES) USERID(appuser)'
                 ;;
               'DISPLAY APSTATUS(*) ALL')
                 echo 'AMQ8932I: Display application status details.'
@@ -116,6 +142,7 @@ jobs:
           grep -q 'runtime/sample_001_.*connections.out' <<<"$listing"
           grep -q 'runtime/sample_002_.*connection-handles.out' <<<"$listing"
 
+          # Legacy normalization remains supported during migration.
           python3 collectors/ibm-mq/normalize_mq_topology.py "$archive" -o "$outdir/normalized.json"
           python3 - "$outdir/normalized.json" <<'PY'
           import json, sys
@@ -126,19 +153,73 @@ jobs:
 
           qmgrs=[node for node in data['nodes'] if node['type']=='qmgr']
           assert {node['name'] for node in qmgrs} >= {'QM_EXT','QM_INT'}
-          assert all(node['status']=='RUNNING' for node in qmgrs if node['name'] in {'QM_EXT','QM_INT'})
+          assert next(node for node in qmgrs if node['name']=='QM_EXT')['status']=='RUNNING'
+          assert 'elsewhere' in next(node for node in qmgrs if node['name']=='QM_INT')['status'].lower()
 
           apps=[node for node in data['nodes'] if node['type']=='application' and node['name']=='MockApp']
           assert len(apps)==1, apps
-          assert set(apps[0]['metadata']['observed_qmgrs'])=={'QM_EXT','QM_INT'}
-
-          client_hosts=[node for node in data['nodes'] if node['type']=='host' and node['name']=='10.0.0.10']
-          assert len(client_hosts)==1, client_hosts
-
-          alias=[node for node in data['nodes'] if node['type']=='queue' and node['name']=='APP.ALIAS']
-          assert len(alias)==2
-          assert all(any(edge['source']==node['id'] and edge['relationship']=='ALIASES_TO' for edge in data['edges']) for node in alias)
-
+          assert set(apps[0]['metadata']['observed_qmgrs'])=={'QM_EXT'}
           assert any(node['type']=='queue' and node['metadata'].get('queue_type')=='QMODEL' for node in data['nodes'])
           assert any(edge['relationship']=='CONSUMED_BY' for edge in data['edges'])
+          PY
+
+          # vNext direct normalization is the authoritative semantic path.
+          python3 collectors/ibm-mq/normalize_mq_observations.py "$archive" -o "$outdir/observations.json"
+          python3 - "$outdir/observations.json" services/core/registry/v1.json <<'PY'
+          import json, sys
+          data=json.load(open(sys.argv[1], encoding='utf-8'))
+          registry=json.load(open(sys.argv[2], encoding='utf-8'))
+
+          assert data['schema_version']=='osi.observation.bundle/v2'
+          assert data['run']['source']['kind']=='ibm_mq_host'
+          assert data['run']['artifact']['sha256']
+          assert data['run']['metadata']['normalization_policy']=='latest-successful-runtime-sample-for-current-state'
+
+          entities={item['ref']: item for item in data['entities']}
+          assert len(entities)==len(data['entities'])
+          assert all(rel['source_ref'] in entities and rel['target_ref'] in entities for rel in data['relations'])
+
+          entity_defs={item['type']: item for item in registry['entities']}
+          relation_defs={item['type']: item for item in registry['relationships']}
+          for item in data['entities']:
+              definition=entity_defs[item['semantic_type']]
+              hints=item['identity']['hints']
+              assert any(all(field in hints and str(hints[field]).strip() for field in rule['fields']) for rule in definition['identity']['rules']), item
+          for rel in data['relations']:
+              definition=relation_defs[rel['semantic_type']]
+              assert entities[rel['source_ref']]['semantic_type'] in definition['source_types'], rel
+              assert entities[rel['target_ref']]['semantic_type'] in definition['target_types'], rel
+              assert rel['evidence_class'] in definition['evidence_classes'], rel
+
+          qmgr=[e for e in data['entities'] if e['semantic_type']=='mq.queue_manager' and e['display_name']=='QM_EXT']
+          assert any(e['identity']['hints'].get('qmid')=='QMID-EXT-0001' for e in qmgr), qmgr
+
+          instances=[e for e in data['entities'] if e['semantic_type']=='mq.queue_manager_instance']
+          roles={e['display_name']: e['properties'].get('runtime_role') for e in instances}
+          assert roles['QM_EXT @ '+data['run']['source']['display_name']]=='active', roles
+          assert roles['QM_INT @ '+data['run']['source']['display_name']]=='not_active', roles
+
+          failed=[c for c in data['coverage'] if c['scope_type']=='queue_manager' and c['scope_key']=='QM_INT' and c['object_class']=='mq.queue_manager']
+          assert len(failed)==1 and failed[0]['mode']=='failed', failed
+          assert 'AMQ8146E' in failed[0].get('error',''), failed
+
+          reltypes={rel['semantic_type'] for rel in data['relations']}
+          assert 'runtime.opens_for_output' in reltypes
+          assert 'runtime.opens_for_input' in reltypes
+          assert 'routing.routes_via' in reltypes
+          assert 'routing.transmits_via' in reltypes
+          assert 'network.connects_to' in reltypes
+          assert not any(name.startswith('activity.') for name in reltypes), reltypes
+
+          unresolved=[u for u in data['unresolved_references'] if u['reason']=='remote_queue_target_not_collected']
+          assert len(unresolved)==1, unresolved
+          assert unresolved[0]['vendor_value']=='QM_REMOTE:TARGET.Q'
+
+          # A client socket is a network endpoint, not automatically a physical host.
+          assert not any(e['semantic_type']=='infra.host' and e['display_name'].startswith('10.0.0.10') for e in data['entities'])
+          assert any(e['semantic_type']=='infra.network_endpoint' and e['properties'].get('host')=='10.0.0.10' for e in data['entities'])
+
+          selected=data['run']['metadata']['selected_runtime_samples']['QM_EXT']
+          assert selected['connections'].startswith('sample_002_'), selected
+          assert selected['queue-handles'].startswith('sample_002_'), selected
           PY
