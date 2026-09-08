@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="dark" />
   <title>MW Dashboard · Topology Explorer</title>
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/routes-v2.css" />
 </head>
 <body>
   <div class="app-shell">
@@ -99,23 +100,40 @@
       </section>
 
       <section id="view-routes" class="view" data-view-panel="routes">
-        <section class="route-builder panel">
-          <div>
-            <p class="section-kicker">End-to-end trace</p>
-            <h2>Find a message path</h2>
-            <p>Trace only message-flow relationships supported by the current evidence. Ownership edges are intentionally excluded from route calculation.</p>
+        <section class="route-workbench panel">
+          <div class="route-workbench-head">
+            <div>
+              <p class="section-kicker">Message delivery trace</p>
+              <h2>What path does this message take?</h2>
+              <p>Select an application or queue at each end. The trace follows message-delivery relationships, then expands MQ transport separately so XMITQ and sender-channel evidence is not hidden by a shorter logical target mapping.</p>
+            </div>
+            <span class="route-mode-badge"><i></i>Evidence-aware delivery</span>
           </div>
-          <form id="routeForm" class="route-form">
-            <label><span>From</span><input id="routeFrom" list="routeObjects" autocomplete="off" placeholder="Application or queue..." required /></label>
-            <div class="route-arrow">→</div>
-            <label><span>To</span><input id="routeTo" list="routeObjects" autocomplete="off" placeholder="Queue, application or queue manager..." required /></label>
-            <button type="submit">Trace route</button>
-            <datalist id="routeObjects"></datalist>
+          <form id="routeForm" class="route-form-v2">
+            <div class="route-picker">
+              <div class="route-picker-label"><span>Source</span><small>Producer or queue</small></div>
+              <input id="routeFrom" type="search" autocomplete="off" placeholder="Search application or queue…" required />
+              <div id="routeFromContext" class="route-picker-context">Choose an application or queue</div>
+              <div id="routeFromResults" class="route-suggestions" role="listbox"></div>
+            </div>
+            <button id="routeSwap" class="route-swap ghost" type="button" title="Swap source and destination" aria-label="Swap source and destination">⇄</button>
+            <div class="route-picker">
+              <div class="route-picker-label"><span>Destination</span><small>Target queue or consumer</small></div>
+              <input id="routeTo" type="search" autocomplete="off" placeholder="Search destination application or queue…" required />
+              <div id="routeToContext" class="route-picker-context">Choose a destination application or queue</div>
+              <div id="routeToResults" class="route-suggestions" role="listbox"></div>
+            </div>
+            <button class="route-submit" type="submit">Trace delivery</button>
+            <datalist id="routeObjects" hidden></datalist>
           </form>
+          <div class="route-help">
+            <div class="route-help-copy"><strong>How to read the result:</strong> the main journey is the logical delivery chain. When a QREMOTE is involved, its XMITQ → sender channel → endpoint → remote queue manager transport is expanded underneath that hop. Observed, configured and inferred evidence stay visibly separate.</div>
+            <div id="routeSuggestions" class="route-quick"><span>Loading known evidence…</span></div>
+          </div>
         </section>
-        <section class="panel route-results">
-          <div class="section-heading compact-heading"><div><p class="section-kicker">Evidence path</p><h2 id="routeTitle">No route selected</h2></div><span id="routeMeta"></span></div>
-          <div id="routeResult" class="route-empty">Choose a source and destination to trace the shortest supported directed path.</div>
+        <section class="panel route-results-v2">
+          <div class="section-heading compact-heading"><div><p class="section-kicker">Evidence journey</p><h2 id="routeTitle">No route selected</h2></div><span id="routeMeta"></span></div>
+          <div id="routeResult" class="route-empty">Choose a source and destination. We will show the best supported delivery route, transport details, evidence quality and any missing placement.</div>
         </section>
       </section>
 
@@ -174,5 +192,6 @@
     </main>
   </div>
   <script src="/app.js" type="module"></script>
+  <script src="/routes-v2.js" type="module"></script>
 </body>
 </html>
