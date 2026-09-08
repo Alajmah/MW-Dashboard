@@ -46,24 +46,27 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: "1.27.1"
-          cache-dependency-path: services/core/go.mod
+          cache-dependency-path: services/core/go.sum
 
       - name: Validate JSON contracts
         run: |
           python3 -m json.tool contracts/v2/observation-bundle.schema.json >/dev/null
           python3 -m json.tool services/core/registry/v1.json >/dev/null
 
-      - name: Resolve Go dependency lockfile
+      - name: Verify committed Go dependency lockfile
         working-directory: services/core
         run: |
+          test -s go.sum
+          go mod download
+          go mod verify
           go mod tidy
-          echo '--- GO_SUM_BEGIN ---'
-          cat go.sum
-          echo '--- GO_SUM_END ---'
+          git diff --exit-code -- go.mod go.sum
 
-      - name: Apply PostgreSQL schema
+      - name: Apply PostgreSQL migrations
         working-directory: services/core
-        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0001_semantic_core.sql
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0001_semantic_core.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0002_reconciliation.sql
 
       - name: Test semantic core
         working-directory: services/core
