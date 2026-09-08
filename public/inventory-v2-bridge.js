@@ -21,3 +21,12 @@ if (rows) {
 document.addEventListener("click", event => {
   if (event.target.closest('[data-view="inventory"], #jumpInventory')) requestInventoryV2Refresh();
 });
+
+if (!document.querySelector('link[href="/semantic-ux.css"]')) {
+  const semanticStyles = document.createElement("link");
+  semanticStyles.rel = "stylesheet";
+  semanticStyles.href = "/semantic-ux.css";
+  document.head.appendChild(semanticStyles);
+}
+
+import("/semantic-ux.js").catch(error => console.error("Semantic UX layer failed to load", error));
