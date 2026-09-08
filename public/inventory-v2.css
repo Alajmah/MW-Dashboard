@@ -1,0 +1,35 @@
+/* Inventory v2 — contextual, object-aware inventory. */
+.inv-context{display:flex;justify-content:space-between;gap:18px;align-items:center;padding:14px 16px;margin-bottom:10px;overflow:visible}
+.inv-breadcrumb{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted-strong)}
+.inv-breadcrumb span:last-child{color:var(--text);font-weight:800}
+.inv-context-metrics{display:flex;gap:16px;align-items:center;flex-wrap:wrap;color:var(--muted-strong);font-size:11px}
+.inv-context-metrics strong{color:var(--text);font-size:13px;margin-right:3px}
+.inv-filter-chips{display:flex;gap:7px;flex-wrap:wrap;margin:-3px 0 11px;padding:0 2px}.inv-filter-chips[hidden]{display:none}
+.inv-chip{min-height:30px;padding:5px 9px;border:1px solid #365775;background:#102238;color:#cfe2f4;border-radius:999px;font-size:10px;font-weight:700}
+.inv-chip span{margin-left:5px;color:#8fb0cf;font-size:13px}.inv-chip:hover{border-color:#5b82a8;background:#142b46}
+.inv-status-filter{min-width:150px}
+
+.inventory-layout{grid-template-columns:minmax(0,1fr) minmax(370px,420px)}
+.inventory-panel .table-wrap{max-height:72vh}
+.inventory-panel table{min-width:760px}
+.inventory-panel th{white-space:nowrap}
+.inventory-panel td{vertical-align:middle}
+.inventory-panel tbody tr{outline:none}
+.inventory-panel tbody tr:focus{background:#132a43}
+.inventory-panel tbody tr.selected{background:#1a3d61;box-shadow:inset 3px 0 #71b7ff}
+.inventory-panel tbody tr.selected td:first-child{font-weight:800}
+.inv-status{display:inline-flex;align-items:center;min-height:24px;padding:3px 7px;border-radius:999px;font-size:10px;font-weight:850;letter-spacing:.02em;white-space:nowrap}
+.inv-status.good{background:#123529;color:#a4e9ca}.inv-status.warn{background:#3b2d17;color:#f4cf89}.inv-status.info{background:#17304c;color:#bfddfa}.inv-status.muted{background:#1a2634;color:#a8bacd}
+
+.object-detail{max-height:82vh}
+.object-detail .detail-head{position:sticky;top:0;z-index:3;background:#0e1b2b;border-bottom-color:#30465e}
+.detail-head h2{overflow-wrap:anywhere}
+.inv-detail-actions{display:flex;gap:7px;flex-wrap:wrap;padding:12px 14px 0}.inv-detail-actions button{min-height:32px;font-size:10px;padding:5px 8px}
+.inv-runtime h3{margin:0 0 10px}.inv-runtime-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.inv-runtime-grid>div{background:#0a1724;border:1px solid #1e344b;border-radius:8px;padding:8px}.inv-runtime-grid span,.inv-runtime-grid strong{display:block}.inv-runtime-grid span{font-size:10px;color:var(--muted-strong)}.inv-runtime-grid strong{font-size:11px;margin-top:3px;overflow-wrap:anywhere}
+.inv-relation{width:100%;display:flex;justify-content:space-between;gap:12px;align-items:flex-start;text-align:left;background:transparent;color:var(--text);border:0;border-bottom:1px solid rgba(255,255,255,.06);border-radius:0;padding:10px 0;min-height:0}.inv-relation:last-child{border-bottom:0}.inv-relation:hover{background:#11243a;margin-left:-6px;margin-right:-6px;width:calc(100% + 12px);padding-left:6px;padding-right:6px;border-radius:7px}.inv-rel-main{min-width:0}.inv-rel-main b,.inv-rel-main strong,.inv-rel-main small{display:block}.inv-rel-main b{font-size:11px;color:#a9bfd6;font-weight:700}.inv-rel-main strong{font-size:12px;margin-top:2px;overflow-wrap:anywhere}.inv-rel-main small{font-size:10px;margin-top:3px;color:var(--muted-strong)}
+.inv-relation .evidence-badge{flex:0 0 auto;margin-top:1px}
+.inv-raw{padding:0;border-top:1px solid var(--line)}.inv-raw summary{cursor:pointer;list-style:none;padding:14px;font-size:12px;font-weight:800;color:#c7d7e7}.inv-raw summary::-webkit-details-marker{display:none}.inv-raw summary:after{content:"+";float:right;color:var(--muted)}.inv-raw[open] summary:after{content:"−"}.inv-raw .metadata-list{padding:0 14px 14px}
+
+@media(max-width:1200px){.inventory-layout{grid-template-columns:minmax(0,1fr) 360px}.inv-context{align-items:flex-start;flex-direction:column}.inv-context-metrics{gap:10px 14px}}
+@media(max-width:900px){.inventory-layout{grid-template-columns:1fr}.object-detail{position:static;max-height:none}.inventory-panel .table-wrap{max-height:58vh}.inv-status-filter{min-width:100%}}
+@media(max-width:760px){.inv-context{padding:12px}.inv-context-metrics{display:grid;grid-template-columns:1fr 1fr;width:100%;gap:7px}.inv-context-metrics span{background:#0a1724;border:1px solid #1d3349;border-radius:8px;padding:8px}.inventory-panel table{min-width:820px}.inv-runtime-grid{grid-template-columns:1fr}.inv-detail-actions button{width:100%}}
