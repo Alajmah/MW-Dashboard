@@ -35,6 +35,17 @@ func coverageScopeSQL(scopeType string, subject string) (string, bool) {
 	}
 }
 
+func coveragePropertyString(coverage domain.Coverage, key string) string {
+	if coverage.Properties == nil {
+		return ""
+	}
+	value, ok := coverage.Properties[key].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
 func reconcileAssertionLifecycle(ctx context.Context, tx pgx.Tx, bundle domain.ObservationBundle) (int, error) {
 	closed := 0
 
@@ -76,7 +87,12 @@ func reconcileAssertionLifecycle(ctx context.Context, tx pgx.Tx, bundle domain.O
 			if !supported {
 				continue
 			}
-			relationType := strings.TrimPrefix(coverage.ObjectClass, "relation:")
+			relationType := coveragePropertyString(coverage, "relationship_type")
+			if relationType == "" {
+				relationType = strings.TrimPrefix(coverage.ObjectClass, "relation:")
+			}
+			targetType := coveragePropertyString(coverage, "target_type")
+			sourceType := coveragePropertyString(coverage, "source_type")
 			query := `
 				UPDATE semantic_assertion previous
 				SET valid_to=$1,
@@ -85,7 +101,10 @@ func reconcileAssertionLifecycle(ctx context.Context, tx pgx.Tx, bundle domain.O
 				      'closed_by_run_id',$2::text,
 				      'coverage_object_class',$6::text,
 				      'coverage_scope_type',$7::text,
-				      'coverage_scope_key',$8::text)
+				      'coverage_scope_key',$8::text,
+				      'coverage_relationship_type',$10::text,
+				      'coverage_target_type',NULLIF($11::text,''),
+				      'coverage_source_type',NULLIF($12::text,''))
 				FROM source_run previous_run, canonical_relation relation
 				WHERE previous.source_run_id=previous_run.run_id
 				  AND previous.relation_id=relation.relation_id
@@ -96,10 +115,16 @@ func reconcileAssertionLifecycle(ctx context.Context, tx pgx.Tx, bundle domain.O
 				  AND previous_run.source_kind=$4
 				  AND previous_run.source_id=$5
 				  AND previous_run.completed_at <= $1
-				  AND relation.relationship_type=$10::text` + scopeSQL
+				  AND relation.relationship_type=$10::text
+				  AND ($11::text='' OR EXISTS (
+				    SELECT 1 FROM canonical_entity target
+				    WHERE target.entity_id=relation.target_entity_id AND target.entity_type=$11::text))
+				  AND ($12::text='' OR EXISTS (
+				    SELECT 1 FROM canonical_entity source
+				    WHERE source.entity_id=relation.source_entity_id AND source.entity_type=$12::text))` + scopeSQL
 			result, err = tx.Exec(ctx, query,
 				bundle.Run.CompletedAt, bundle.Run.RunID, bundle.Run.Environment, bundle.Run.Source.Kind, bundle.Run.Source.ID,
-				coverage.ObjectClass, coverage.ScopeType, coverage.ScopeKey, closeReason, relationType)
+				coverage.ObjectClass, coverage.ScopeType, coverage.ScopeKey, closeReason, relationType, targetType, sourceType)
 		} else {
 			scopeSQL, supported := coverageScopeSQL(coverage.ScopeType, "entity")
 			if !supported {
