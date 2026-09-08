@@ -59,9 +59,21 @@ jobs:
                 echo 'AMQ8408I: Display Queue Manager details.'
                 echo "   QMNAME($qmgr) PLATFORM(UNIX) CMDLEVEL(940) VERSION(09040000)"
                 ;;
+              'DISPLAY QMSTATUS ALL')
+                echo 'AMQ8705I: Display Queue Manager Status Details.'
+                echo "   QMNAME($qmgr) TYPE(QMGR) STATUS(RUNNING) CHINIT(RUNNING) CMDSERV(RUNNING) CONNS(1)"
+                ;;
               'DISPLAY QLOCAL(*) ALL')
                 echo 'AMQ8409I: Display Queue details.'
                 echo '   QUEUE(APP.REQUEST) TYPE(QLOCAL) USAGE(NORMAL) PUT(ENABLED) GET(ENABLED)'
+                ;;
+              'DISPLAY QMODEL(*) ALL')
+                echo 'AMQ8409I: Display Queue details.'
+                echo '   QUEUE(SYSTEM.DEFAULT.MODEL.QUEUE) TYPE(QMODEL) PUT(ENABLED) GET(ENABLED)'
+                ;;
+              'DISPLAY QALIAS(*) ALL')
+                echo 'AMQ8409I: Display Queue details.'
+                echo '   QUEUE(APP.ALIAS) TYPE(QALIAS) TARGET(APP.REQUEST) PUT(ENABLED)'
                 ;;
               'DISPLAY CHANNEL(*) ALL')
                 echo 'AMQ8414I: Display Channel details.'
@@ -76,6 +88,10 @@ jobs:
                 echo 'AMQ8450I: Display queue status details.'
                 echo '   QUEUE(APP.REQUEST) TYPE(HANDLE) APPLTAG(MockApp) APPLTYPE(USER)'
                 echo "   CHANNEL(APP.$qmgr) CONNAME(10.0.0.10) INPUT(SHARED) OUTPUT(NO) USERID(appuser)"
+                ;;
+              'DISPLAY APSTATUS(*) ALL')
+                echo 'AMQ8932I: Display application status details.'
+                echo '   APPLNAME(MockApp) COUNT(1) TYPE(APPL)'
                 ;;
             esac
           done
@@ -107,7 +123,22 @@ jobs:
           ids={node['id'] for node in data['nodes']}
           assert len(ids)==len(data['nodes'])
           assert all(edge['source'] in ids and edge['target'] in ids for edge in data['edges'])
-          assert any(node['type']=='qmgr' and node['name']=='QM_EXT' for node in data['nodes'])
-          assert any(node['type']=='application' and node['name']=='MockApp' for node in data['nodes'])
+
+          qmgrs=[node for node in data['nodes'] if node['type']=='qmgr']
+          assert {node['name'] for node in qmgrs} >= {'QM_EXT','QM_INT'}
+          assert all(node['status']=='RUNNING' for node in qmgrs if node['name'] in {'QM_EXT','QM_INT'})
+
+          apps=[node for node in data['nodes'] if node['type']=='application' and node['name']=='MockApp']
+          assert len(apps)==1, apps
+          assert set(apps[0]['metadata']['observed_qmgrs'])=={'QM_EXT','QM_INT'}
+
+          client_hosts=[node for node in data['nodes'] if node['type']=='host' and node['name']=='10.0.0.10']
+          assert len(client_hosts)==1, client_hosts
+
+          alias=[node for node in data['nodes'] if node['type']=='queue' and node['name']=='APP.ALIAS']
+          assert len(alias)==2
+          assert all(any(edge['source']==node['id'] and edge['relationship']=='ALIASES_TO' for edge in data['edges']) for node in alias)
+
+          assert any(node['type']=='queue' and node['metadata'].get('queue_type')=='QMODEL' for node in data['nodes'])
           assert any(edge['relationship']=='CONSUMED_BY' for edge in data['edges'])
           PY
