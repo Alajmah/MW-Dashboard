@@ -3,62 +3,181 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>MW Dashboard · Current Topology</title>
+  <meta name="color-scheme" content="dark" />
+  <title>MW Dashboard · Middleware Topology</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <header class="topbar">
-    <div>
-      <p class="eyebrow">Middleware Operations</p>
-      <h1>Current Topology</h1>
+    <div class="brand-block">
+      <div class="brand-mark" aria-hidden="true">MW</div>
+      <div>
+        <p class="eyebrow">Middleware Operations</p>
+        <h1>Topology Explorer</h1>
+        <p class="page-subtitle">Trace applications, queue managers, queues, channels and remote endpoints from the active topology snapshot.</p>
+      </div>
     </div>
-    <div id="snapshotBadge" class="badge">No active snapshot</div>
+    <div class="topbar-actions">
+      <div class="snapshot-state">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div>
+          <span class="snapshot-label">Active snapshot</span>
+          <strong id="snapshotBadge">No active snapshot</strong>
+        </div>
+      </div>
+      <button id="jumpImport" class="secondary compact" type="button">Import snapshot</button>
+    </div>
   </header>
 
   <main class="shell">
-    <section class="panel upload-panel">
-      <div>
-        <h2>Manual topology update</h2>
-        <p>Upload a normalized topology JSON snapshot. The current topology remains active unless validation and persistence complete successfully.</p>
+    <section class="stats" id="stats" aria-label="Topology summary"></section>
+
+    <section class="panel explorer-panel">
+      <div class="panel-heading explorer-heading">
+        <div>
+          <div class="heading-line">
+            <h2>Current topology</h2>
+            <span id="filteredCount" class="count-badge">0 objects</span>
+          </div>
+          <p id="topologyMeta">Waiting for an active snapshot.</p>
+        </div>
+        <div class="legend" aria-label="Relationship evidence legend">
+          <span><i class="legend-line observed"></i>Observed</span>
+          <span><i class="legend-line configured"></i>Configured</span>
+          <span><i class="legend-line inferred"></i>Inferred</span>
+        </div>
       </div>
-      <form id="uploadForm" class="upload-form">
-        <input id="topologyFile" type="file" accept="application/json,.json" required />
-        <button type="submit">Upload & activate</button>
-      </form>
-      <p id="uploadStatus" class="status-line" aria-live="polite"></p>
-    </section>
 
-    <section class="stats" id="stats"></section>
+      <div class="filterbar" aria-label="Topology filters">
+        <label class="search-field">
+          <span class="sr-only">Search topology</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z"/></svg>
+          <input id="searchInput" type="search" autocomplete="off" placeholder="Search host, application, queue, channel, IP…" />
+        </label>
 
-    <section class="panel toolbar">
-      <div>
-        <h2>Topology</h2>
-        <p id="topologyMeta">Waiting for an active snapshot.</p>
+        <label class="select-field">
+          <span>Type</span>
+          <select id="typeFilter"><option value="">All object types</option></select>
+        </label>
+
+        <div class="evidence-filters" role="group" aria-label="Relationship evidence filters">
+          <label class="evidence-toggle"><input id="showObserved" type="checkbox" checked /><span class="evidence-swatch observed"></span>Observed</label>
+          <label class="evidence-toggle"><input id="showConfigured" type="checkbox" checked /><span class="evidence-swatch configured"></span>Configured</label>
+          <label class="evidence-toggle"><input id="showInferred" type="checkbox" checked /><span class="evidence-swatch inferred"></span>Inferred</label>
+        </div>
+
+        <button id="clearFilters" type="button" class="ghost compact">Reset</button>
       </div>
-      <form id="searchForm" class="search-form">
-        <input id="searchInput" type="search" placeholder="Search host, application, queue, channel…" />
-        <button type="submit" class="secondary">Search</button>
-        <button id="clearSearch" type="button" class="ghost">Clear</button>
-      </form>
+
+      <div class="graph-toolbar">
+        <div>
+          <strong id="graphTitle">Topology overview</strong>
+          <span id="graphHint">Select an object to inspect its neighborhood.</span>
+        </div>
+        <div class="graph-actions">
+          <button id="showOverview" type="button" class="ghost compact" hidden>Back to overview</button>
+          <span id="graphLimit" class="quiet"></span>
+        </div>
+      </div>
+
+      <div class="graph-wrap">
+        <div id="emptyState" class="empty-state">
+          <strong>No active topology yet</strong>
+          <span>Import a normalized topology snapshot to begin exploring middleware relationships.</span>
+        </div>
+        <svg id="graph" role="img" aria-label="Current middleware topology"></svg>
+      </div>
     </section>
 
-    <section class="panel graph-panel">
-      <div id="emptyState" class="empty-state">Upload the first normalized topology snapshot to begin.</div>
-      <svg id="graph" role="img" aria-label="Current topology graph"></svg>
+    <section class="workspace-grid">
+      <section class="panel results-panel">
+        <div class="section-heading">
+          <div>
+            <h2 id="resultsTitle">Topology objects</h2>
+            <p id="resultsSubtitle">Select a row to inspect relationships and metadata.</p>
+          </div>
+          <span id="resultCount"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Type</th><th>Name</th><th>Environment</th><th>Scope</th><th>Status</th></tr></thead>
+            <tbody id="resultRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <aside class="panel detail-panel" aria-live="polite">
+        <div id="detailEmpty" class="detail-empty">
+          <div class="detail-icon" aria-hidden="true">↗</div>
+          <h2>Object details</h2>
+          <p>Select a node from the graph or table to inspect its metadata and connected relationships.</p>
+        </div>
+        <div id="detailContent" hidden>
+          <div class="detail-heading">
+            <div>
+              <span id="detailType" class="type-pill"></span>
+              <h2 id="detailName"></h2>
+              <p id="detailContext"></p>
+            </div>
+            <button id="closeDetail" class="icon-button" type="button" aria-label="Close object details">×</button>
+          </div>
+          <div id="detailFacts" class="fact-grid"></div>
+          <div class="detail-section">
+            <div class="detail-section-heading">
+              <h3>Relationships</h3>
+              <span id="relationshipCount"></span>
+            </div>
+            <div id="relationshipList" class="relationship-list"></div>
+          </div>
+          <div class="detail-section">
+            <h3>Metadata</h3>
+            <dl id="metadataList" class="metadata-list"></dl>
+          </div>
+        </div>
+      </aside>
     </section>
 
-    <section class="panel results-panel">
+    <section class="panel snapshots-panel">
       <div class="section-heading">
-        <h2 id="resultsTitle">Topology objects</h2>
-        <span id="resultCount"></span>
+        <div>
+          <h2>Snapshot history</h2>
+          <p>Recent imports retained for traceability and rollback planning.</p>
+        </div>
+        <span id="snapshotCount"></span>
       </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Type</th><th>Name</th><th>Environment</th><th>Scope</th><th>Status</th></tr></thead>
-          <tbody id="resultRows"></tbody>
-        </table>
-      </div>
+      <div id="snapshotList" class="snapshot-list"><div class="skeleton-row"></div></div>
     </section>
+
+    <details id="importSection" class="panel import-panel">
+      <summary>
+        <div>
+          <span class="summary-kicker">Administration</span>
+          <strong>Import topology snapshot</strong>
+          <small>Manual update · active topology is preserved if validation fails</small>
+        </div>
+        <span class="summary-action">Open</span>
+      </summary>
+      <div class="import-body">
+        <div>
+          <h2>Manual topology update</h2>
+          <p>Upload a normalized topology JSON file. The server validates the graph, persists it, verifies counts, and only then activates the new snapshot.</p>
+          <ul class="safety-list">
+            <li>Existing topology remains active on failure.</li>
+            <li>Node and relationship IDs are validated before activation.</li>
+            <li>Use the IBM MQ normalizer output, not the raw collector archive.</li>
+          </ul>
+        </div>
+        <form id="uploadForm" class="upload-form">
+          <label class="file-drop" for="topologyFile">
+            <input id="topologyFile" type="file" accept="application/json,.json" required />
+            <span class="file-drop-title">Choose normalized topology JSON</span>
+            <span id="fileHint">No file selected</span>
+          </label>
+          <button id="uploadButton" type="submit">Validate, import & activate</button>
+          <p id="uploadStatus" class="status-line" aria-live="polite"></p>
+        </form>
+      </div>
+    </details>
   </main>
 
   <script src="/app.js" type="module"></script>

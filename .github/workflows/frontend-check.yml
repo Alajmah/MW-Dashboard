@@ -1,0 +1,59 @@
+name: Frontend check
+
+on:
+  pull_request:
+    paths:
+      - "public/**"
+      - ".github/workflows/frontend-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/**"
+      - ".github/workflows/frontend-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: JavaScript syntax
+        run: node --check public/app.js
+
+      - name: DOM contract
+        shell: python
+        run: |
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re
+
+          class IDs(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.ids = []
+              def handle_starttag(self, tag, attrs):
+                  attrs = dict(attrs)
+                  if "id" in attrs:
+                      self.ids.append(attrs["id"])
+
+          html = Path("public/index.html").read_text()
+          js = Path("public/app.js").read_text()
+          parser = IDs()
+          parser.feed(html)
+
+          duplicates = sorted({item for item in parser.ids if parser.ids.count(item) > 1})
+          if duplicates:
+              raise SystemExit(f"duplicate HTML ids: {duplicates}")
+
+          html_ids = set(parser.ids)
+          referenced = set(re.findall(r'\$\("([A-Za-z0-9_-]+)"\)', js))
+          missing = sorted(referenced - html_ids)
+          if missing:
+              raise SystemExit(f"JavaScript references missing HTML ids: {missing}")
+
+          print(f"DOM contract OK: {len(html_ids)} ids, {len(referenced)} referenced by app.js")
