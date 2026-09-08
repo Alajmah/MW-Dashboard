@@ -1,13 +1,14 @@
 # IBM MQ topology collector
 
-`mq-topology-collector.sh` creates a read-only raw evidence archive for the MW-Dashboard IBM MQ normalization adapter.
+`mq-topology-collector.sh` creates a read-only raw evidence archive for MW-Dashboard. `normalize_mq_topology.py` converts that archive into the normalized topology JSON accepted by the Cloudflare dashboard.
 
-The collector intentionally does **not** construct topology itself. It records IBM MQ configuration and runtime observations in separate files so the downstream adapter can classify relationships as `configured`, `observed`, or, only when necessary, `inferred`.
+The collector intentionally does **not** construct topology itself. It records IBM MQ configuration and runtime observations in separate files so the normalizer can classify relationships as `configured`, `observed`, or, only when necessary, `inferred`.
 
 ## Prerequisites
 
 - Linux/UNIX host running IBM MQ.
-- Bash 4+.
+- Bash 4+ for collection.
+- Python 3.9+ for normalization.
 - `dspmq` and `runmqsc` in `PATH`.
 - An account with authority to issue the requested MQSC `DISPLAY` commands. Running as the normal IBM MQ administrative account (`mqm` on Linux) is the expected first-use model.
 - `tar`, `date`, and `hostname`.
@@ -57,7 +58,7 @@ To place the resulting archive elsewhere:
 ./mq-topology-collector.sh --output-dir /tmp/mw-topology --samples 5 --interval 60
 ```
 
-## Output
+## Raw output
 
 The generated file is named:
 
@@ -74,6 +75,48 @@ mq-topology-sjeditb18604-20260908T050000Z.tar.gz
 The archive contains host identity, MQ installation/inventory evidence, static queue-manager definitions, and one or more runtime sample directories.
 
 See [`../../docs/mq-raw-collector-contract-v1.md`](../../docs/mq-raw-collector-contract-v1.md) for the stable archive layout.
+
+## Normalize for MW-Dashboard
+
+Run the normalizer on a workstation or controlled middleware host; IBM MQ does not need to be installed on the machine doing the normalization:
+
+```bash
+python3 normalize_mq_topology.py \
+  mq-topology-sjeditb18604-20260908T050000Z.tar.gz \
+  -o normalized-topology.json
+```
+
+Override environment classification when needed:
+
+```bash
+python3 normalize_mq_topology.py archive.tar.gz \
+  --environment prod \
+  -o normalized-topology.json
+```
+
+The normalizer reads the `.tar.gz` directly and rejects absolute paths, `..` traversal entries, and symbolic/hard links. It does not extract the archive onto disk.
+
+It creates stable node and edge IDs and currently models:
+
+```text
+Host
+  -> Queue Manager
+  -> Queue / Channel / Listener
+
+Client Host
+  -> Application
+  -> SVRCONN
+  -> Queue
+
+QREMOTE
+  -> XMITQ
+  -> Sender Channel
+  -> Remote Queue Manager / endpoint
+```
+
+Runtime `DISPLAY CHSTATUS` records are used when available to establish observed remote queue-manager names and endpoint addresses. Queue-handle and connection evidence are used for observed application/SVRCONN/queue relationships. Cluster-advertised queues remain configuration evidence.
+
+The resulting JSON conforms to [`../../docs/topology-contract-v1.md`](../../docs/topology-contract-v1.md) and can be uploaded to the MW-Dashboard manual import endpoint/UI.
 
 ## What is captured
 
@@ -133,4 +176,4 @@ Optionally inspect the file list without extracting it:
 tar -tzf mq-topology-*.tar.gz | less
 ```
 
-For the current manual workflow, transfer the `.tar.gz` through your approved method and provide the archive for development of the normalization adapter. The raw archive is not uploaded directly to the live dashboard; the adapter will convert it to the normalized topology JSON contract first.
+For the current manual workflow, transfer the `.tar.gz` through your approved method, normalize it, then upload the generated `normalized-topology.json` to the dashboard.
