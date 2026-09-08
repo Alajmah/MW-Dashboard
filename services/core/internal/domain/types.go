@@ -110,6 +110,10 @@ type IngestResult struct {
 	UnresolvedReferences int    `json:"unresolved_references"`
 	CanonicalEntities     int    `json:"canonical_entities_touched"`
 	CanonicalRelations    int    `json:"canonical_relations_touched"`
+	IdentityConflicts     int    `json:"identity_conflicts"`
+	AssertionsClosed      int    `json:"assertions_closed"`
+	TopologyRevisionID    string `json:"topology_revision_id,omitempty"`
+	TopologyChanged       bool   `json:"topology_changed"`
 	IdempotentReplay      bool   `json:"idempotent_replay"`
 }
 
