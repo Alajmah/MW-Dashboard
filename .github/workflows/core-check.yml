@@ -53,9 +53,13 @@ jobs:
           python3 -m json.tool contracts/v2/observation-bundle.schema.json >/dev/null
           python3 -m json.tool services/core/registry/v1.json >/dev/null
 
-      - name: Download Go modules
+      - name: Resolve Go dependency lockfile
         working-directory: services/core
-        run: go mod download
+        run: |
+          go mod tidy
+          echo '--- GO_SUM_BEGIN ---'
+          cat go.sum
+          echo '--- GO_SUM_END ---'
 
       - name: Apply PostgreSQL schema
         working-directory: services/core
