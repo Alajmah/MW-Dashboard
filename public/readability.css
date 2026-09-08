@@ -1,0 +1,299 @@
+/* Cross-screen readability and accessibility overrides.
+   Loaded after styles.css and routes-v2.css so legacy sizing can be improved
+   without changing component behavior or topology semantics. */
+
+:root {
+  --muted-strong: #a9bbcf;
+  --line-control: #47698a;
+  --focus-ring: #7cc0ff;
+  --font-body: 14px;
+  --font-compact: 13px;
+  --font-secondary: 12px;
+  --font-meta: 11px;
+  --font-badge: 10px;
+}
+
+body {
+  font-size: var(--font-body);
+  line-height: 1.5;
+}
+
+button,
+input,
+select {
+  font-size: var(--font-compact);
+  line-height: 1.35;
+}
+
+button,
+input,
+select,
+[tabindex] {
+  min-height: 40px;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.nav-item {
+  min-height: 42px;
+  font-size: 13px;
+}
+
+.brand strong { font-size: 15px; }
+.brand span { font-size: 11px; color: var(--muted-strong); }
+.sidebar-foot small { font-size: 10px; color: var(--muted-strong); }
+.sidebar-foot strong { font-size: 11px; }
+
+.eyebrow,
+.section-kicker {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.topbar h1 { font-size: 31px; }
+.topbar p:not(.eyebrow) {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted-strong);
+}
+
+.snapshot-chip span,
+.snapshot-chip small { font-size: 10px; color: var(--muted-strong); }
+.snapshot-chip strong { font-size: 12px; }
+
+.ghost {
+  color: #cfdeed;
+  border-color: var(--line-control);
+}
+
+.search-box span,
+.select-box span,
+.route-form label span {
+  font-size: 11px;
+  color: var(--muted-strong);
+}
+
+.search-box input,
+.select-box select,
+.route-form input,
+.route-picker input {
+  border-color: var(--line-control);
+  font-size: 13px;
+}
+
+.toolbar-count {
+  font-size: 11px;
+  color: var(--muted-strong);
+}
+
+/* Overview and summary cards */
+.stat span { font-size: 12px; color: var(--muted-strong); }
+.stat strong { font-size: 26px; }
+.stat small { font-size: 11px; line-height: 1.4; color: var(--muted-strong); }
+
+.section-heading h2 { font-size: 18px; line-height: 1.3; }
+.section-heading p:not(.section-kicker) {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-strong);
+}
+
+.card-head h3 { font-size: 16px; line-height: 1.35; }
+.card-head p { font-size: 12px; line-height: 1.45; color: var(--muted-strong); }
+.pill { font-size: 10px; line-height: 1.25; padding: 4px 8px; }
+
+.mini-metric span {
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--muted-strong);
+}
+.mini-metric strong { font-size: 16px; }
+
+.server-card .identity,
+.qmgr-card .identity,
+.app-card .identity {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted-strong);
+}
+.identity strong { color: #e1edf8; }
+.chip { font-size: 10px; line-height: 1.25; padding: 4px 7px; }
+.card-foot small { font-size: 11px; line-height: 1.35; color: var(--muted-strong); }
+.link-button { font-size: 11px; min-height: 32px; }
+
+.evidence-row,
+.gap-row {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Inventory */
+th {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted-strong);
+  padding: 12px 14px;
+}
+
+td {
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 12px 14px;
+}
+
+tbody tr:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.detail-empty h2,
+.detail-head h2 { font-size: 16px; }
+.detail-empty p { font-size: 12px; line-height: 1.55; }
+.detail-head p { font-size: 11px; color: var(--muted-strong); }
+
+.fact span { font-size: 11px; color: var(--muted-strong); }
+.fact strong { font-size: 12px; line-height: 1.4; }
+.detail-section h3 { font-size: 13px; }
+.relationship-item { font-size: 12px; line-height: 1.45; }
+.relationship-item span { color: var(--muted-strong); }
+.metadata-list div { font-size: 11px; line-height: 1.45; grid-template-columns: 125px 1fr; }
+.metadata-list dt { color: var(--muted-strong); }
+
+/* Snapshots and administration */
+.snapshot-row { font-size: 12px; line-height: 1.4; }
+.snapshot-row small { font-size: 11px; color: var(--muted-strong); }
+.admin-copy p,
+.admin-copy li { font-size: 13px; line-height: 1.65; color: var(--muted-strong); }
+.file-drop strong { font-size: 14px; }
+.file-drop span { font-size: 12px; color: var(--muted-strong); }
+.status-line { font-size: 12px; line-height: 1.45; }
+
+/* Routes v2: investigation timeline should be comfortably readable. */
+.route-workbench-head h2 { font-size: 21px; }
+.route-workbench-head p:not(.section-kicker) {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted-strong);
+}
+.route-mode-badge { font-size: 10px; min-height: 34px; }
+
+.route-picker-label span:first-child { font-size: 11px; color: var(--muted-strong); }
+.route-picker-label small { font-size: 10px; color: #8ea7c0; }
+.route-picker-context {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted-strong);
+  min-height: 22px;
+}
+.route-picker-context.selected { color: #d1deeb; }
+
+.route-option { padding: 11px 12px; }
+.route-option strong { font-size: 12px; line-height: 1.35; }
+.route-option small { font-size: 11px; line-height: 1.4; color: var(--muted-strong); }
+.route-help-copy { font-size: 11px; line-height: 1.55; color: var(--muted-strong); }
+.route-quick > span { font-size: 10px; color: var(--muted-strong); }
+.route-example { font-size: 10px; line-height: 1.3; padding: 7px 9px; }
+
+.route-result-shell { padding: 22px; }
+.route-health-card { padding: 12px; }
+.route-health-card span,
+.route-health-card small { font-size: 11px; line-height: 1.35; color: var(--muted-strong); }
+.route-health-card strong { font-size: 15px; }
+
+.journey-index { font-size: 11px; }
+.journey-card { padding: 14px 16px; }
+.journey-card h3 { font-size: 15px; line-height: 1.4; }
+.journey-card .route-type { font-size: 10px; line-height: 1.3; }
+.journey-context { font-size: 11px; line-height: 1.45; color: var(--muted-strong); }
+.journey-transition-body { font-size: 11px; line-height: 1.4; color: var(--muted-strong); }
+.evidence-badge { font-size: 10px; line-height: 1.25; padding: 4px 8px; }
+
+.transport-detail { padding: 13px 14px; }
+.transport-head strong { font-size: 12px; }
+.transport-head small { font-size: 11px; color: var(--muted-strong); }
+.transport-item { padding: 8px 10px; }
+.transport-item span { font-size: 10px; line-height: 1.25; color: var(--muted-strong); }
+.transport-item strong { font-size: 12px; line-height: 1.35; max-width: 230px; }
+.transport-note { font-size: 11px; line-height: 1.55; color: var(--muted-strong); }
+.transport-arrow { font-size: 13px; }
+
+.route-warnings h3 { font-size: 13px; }
+.route-warning { font-size: 11px; line-height: 1.5; color: var(--muted-strong); }
+.route-diagnostic-intro h3 { font-size: 17px; }
+.route-diagnostic-intro p { font-size: 12px; line-height: 1.6; color: var(--muted-strong); }
+.diagnostic-card span { font-size: 11px; color: var(--muted-strong); }
+.diagnostic-card strong { font-size: 13px; }
+.diagnostic-card p { font-size: 11px; line-height: 1.5; color: var(--muted-strong); }
+.route-frontier > span { font-size: 11px; color: var(--muted-strong); }
+.frontier-chip { font-size: 11px; line-height: 1.35; }
+
+/* Stronger interactive boundaries without brightening passive separators. */
+.search-box input,
+.select-box select,
+.route-picker input,
+.file-drop,
+.ghost,
+.icon-button,
+.route-swap,
+.route-example {
+  border-color: var(--line-control);
+}
+
+.search-box input:hover,
+.select-box select:hover,
+.route-picker input:hover,
+.file-drop:hover,
+.ghost:hover {
+  border-color: #5b82a8;
+}
+
+/* Respect motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+@media (max-width: 1100px) {
+  .main { padding-left: 24px; padding-right: 24px; }
+  .card-grid,
+  .server-grid,
+  .qmgr-grid,
+  .app-grid { grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  body { font-size: 14px; }
+  .main { padding: 20px 16px 50px; }
+  .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .nav-item { text-align: center; padding: 11px 8px; }
+  .top-actions { flex-wrap: wrap; }
+  .snapshot-chip { min-width: min(100%, 240px); }
+  .card-grid,
+  .server-grid,
+  .qmgr-grid,
+  .app-grid { grid-template-columns: 1fr; }
+  .section-heading { align-items: flex-start; }
+  .section-heading h2 { font-size: 17px; }
+  .toolbar { align-items: stretch; }
+  .search-box,
+  .select-box { min-width: 100%; }
+  .inventory-layout { gap: 14px; }
+  .table-wrap { max-height: 62vh; }
+  table { min-width: 900px; }
+  .route-result-shell { padding: 16px; }
+  .journey-card h3 { font-size: 14px; }
+  .journey-context { gap: 9px 12px; }
+  .transport-chain { gap: 8px; }
+  .transport-item strong { max-width: 190px; }
+}
