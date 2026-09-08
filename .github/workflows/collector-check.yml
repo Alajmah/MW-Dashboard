@@ -32,6 +32,7 @@ jobs:
       - name: Python syntax check
         run: |
           python3 -m py_compile collectors/ibm-mq/normalize_mq_topology.py
+          python3 -m py_compile collectors/ibm-mq/_normalize_mq_observations_impl.py
           python3 -m py_compile collectors/ibm-mq/normalize_mq_observations.py
 
       - name: Help path
@@ -95,6 +96,10 @@ jobs:
                 echo 'AMQ8409I: Display Queue details.'
                 echo '   QUEUE(APP.ALIAS) TYPE(QALIAS) TARGET(APP.REQUEST) PUT(ENABLED)'
                 ;;
+              'DISPLAY QCLUSTER(*) ALL')
+                echo 'AMQ8147E: IBM MQ object * not found.'
+                exit 10
+                ;;
               'DISPLAY CHANNEL(*) ALL')
                 echo 'AMQ8414I: Display Channel details.'
                 echo '   CHANNEL(APP.QM_EXT) CHLTYPE(SVRCONN) MCAUSER(appuser)'
@@ -116,8 +121,12 @@ jobs:
                 echo '   CHANNEL(APP.QM_EXT) CONNAME(10.0.0.10(55001)) INPUT(SHARED) OUTPUT(YES) USERID(appuser)'
                 ;;
               'DISPLAY APSTATUS(*) ALL')
-                echo 'AMQ8932I: Display application status details.'
-                echo '   APPLNAME(MockApp) COUNT(1) TYPE(APPL)'
+                echo 'AMQ8933I: Application status not found.'
+                exit 10
+                ;;
+              'DISPLAY CLUSQMGR(*) ALL')
+                echo 'AMQ8147E: IBM MQ object * not found.'
+                exit 10
                 ;;
             esac
           done
@@ -165,14 +174,16 @@ jobs:
 
           # vNext direct normalization is the authoritative semantic path.
           python3 collectors/ibm-mq/normalize_mq_observations.py "$archive" -o "$outdir/observations.json"
-          python3 - "$outdir/observations.json" services/core/registry/v1.json <<'PY'
-          import json, sys
+          python3 - "$outdir/observations.json" services/core/registry/v1.json "$archive" <<'PY'
+          import json, os, sys
           data=json.load(open(sys.argv[1], encoding='utf-8'))
           registry=json.load(open(sys.argv[2], encoding='utf-8'))
+          archive_path=sys.argv[3]
 
           assert data['schema_version']=='osi.observation.bundle/v2'
           assert data['run']['source']['kind']=='ibm_mq_host'
           assert data['run']['artifact']['sha256']
+          assert data['run']['normalizer_version']=='3.0.1', data['run']['normalizer_version']
           assert data['run']['metadata']['normalization_policy']=='latest-successful-runtime-sample-for-current-state'
 
           entities={item['ref']: item for item in data['entities']}
@@ -203,6 +214,13 @@ jobs:
           assert len(failed)==1 and failed[0]['mode']=='failed', failed
           assert 'AMQ8146E' in failed[0].get('error',''), failed
 
+          cluster=[c for c in data['coverage'] if c['scope_type']=='queue_manager' and c['scope_key']=='QM_EXT' and c['object_class']=='relation:mq.cluster_discovers']
+          assert len(cluster)==1 and cluster[0]['mode']=='point_in_time', cluster
+          assert cluster[0]['properties'].get('empty_result') is True, cluster
+          assert cluster[0]['properties'].get('process_rc')==10, cluster
+          assert cluster[0]['properties'].get('mq_message_codes')==['AMQ8147E'], cluster
+          assert cluster[0]['properties'].get('absence_closes_assertions') is True, cluster
+
           reltypes={rel['semantic_type'] for rel in data['relations']}
           assert 'runtime.opens_for_output' in reltypes
           assert 'runtime.opens_for_input' in reltypes
@@ -222,4 +240,21 @@ jobs:
           selected=data['run']['metadata']['selected_runtime_samples']['QM_EXT']
           assert selected['connections'].startswith('sample_002_'), selected
           assert selected['queue-handles'].startswith('sample_002_'), selected
+
+          # Directly exercise the second real-estate empty form (AMQ8933I).
+          sys.path.insert(0, os.path.join(os.getcwd(), 'collectors', 'ibm-mq'))
+          import normalize_mq_observations as mqv2
+          raw=mqv2.Archive(archive_path)
+          samples=mqv2.runtime_samples(raw, '001_QM_EXT')
+          assert samples, samples
+          app_base=f'qmgr/001_QM_EXT/runtime/{samples[-1]}/application-status'
+          app_health=mqv2.command_health(raw, app_base, 'point_in_time')
+          assert app_health['mode']=='point_in_time', app_health
+          assert app_health['properties'].get('empty_result') is True, app_health
+          assert app_health['properties'].get('mq_message_codes')==['AMQ8933I'], app_health
+
+          # Unknown/non-empty command failures must never be normalized as empty.
+          int_qm=mqv2.command_health(raw, 'qmgr/002_QM_INT/config/qmgr', 'complete')
+          assert int_qm['mode']=='failed', int_qm
+          assert 'AMQ8146E' in int_qm.get('error',''), int_qm
           PY
