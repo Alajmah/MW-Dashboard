@@ -55,12 +55,14 @@ jobs:
               raise SystemExit(f"duplicate HTML ids: {duplicates}")
 
           html_ids = set(parser.ids)
-          referenced = set(re.findall(r'(?:\$|rq)\("([A-Za-z0-9_-]+)"\)', js))
-          missing = sorted(referenced - html_ids)
+          dynamic_ids = set(re.findall(r'(?:\bid|\.id)\s*=\s*["\']([A-Za-z0-9_-]+)["\']', js))
+          dynamic_ids |= set(re.findall(r'id=\\?["\']([A-Za-z0-9_-]+)\\?["\']', js))
+          referenced = set(re.findall(r'(?:\$|rq|iq)\("([A-Za-z0-9_-]+)"\)', js))
+          missing = sorted(referenced - html_ids - dynamic_ids)
           if missing:
-              raise SystemExit(f"JavaScript references missing HTML ids: {missing}")
+              raise SystemExit(f"JavaScript references missing HTML/dynamic ids: {missing}")
 
-          print(f"DOM contract OK: {len(html_ids)} ids, {len(referenced)} referenced by frontend modules")
+          print(f"DOM contract OK: {len(html_ids)} HTML ids, {len(dynamic_ids)} dynamic ids, {len(referenced)} referenced by frontend modules")
 
       - name: Readability contract
         shell: python
@@ -92,3 +94,27 @@ jobs:
               raise SystemExit(f"readability stylesheet contains operational font size below 10px: {min(sizes) if sizes else 'none'}")
 
           print(f"Readability contract OK: {len(sizes)} explicit font-size rules; minimum {min(sizes):g}px")
+
+      - name: Inventory v2 contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          html = Path("public/index.html").read_text()
+          js = Path("public/inventory-v2.js").read_text()
+          css = Path("public/inventory-v2.css").read_text()
+          required = [
+              'href="/inventory-v2.css"',
+              'src="/inventory-v2.js"',
+              'function columnsFor(',
+              'function semanticRelation(',
+              'inventoryStatus',
+              'Raw metadata',
+              'inv-context',
+              'inv-status',
+          ]
+          combined = html + "\n" + js + "\n" + css
+          missing = [item for item in required if item not in combined]
+          if missing:
+              raise SystemExit(f"Inventory v2 contract missing: {missing}")
+          print("Inventory v2 contract OK")
