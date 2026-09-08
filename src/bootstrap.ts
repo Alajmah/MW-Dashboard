@@ -5,20 +5,54 @@ interface Env {
   ASSETS: Fetcher;
 }
 
+const EVIDENCE_CHUNK_CHARS = 250_000;
+
+function splitEvidence(content: string): string[] {
+  const chunks: string[] = [];
+  for (let offset = 0; offset < content.length; offset += EVIDENCE_CHUNK_CHARS) {
+    chunks.push(content.slice(offset, offset + EVIDENCE_CHUNK_CHARS));
+  }
+  return chunks.length ? chunks : [""];
+}
+
 function d1EvidenceBucket(db: D1Database): R2Bucket {
   return {
     async put(key: string, value: unknown, options?: { customMetadata?: Record<string, string> }) {
       const content = typeof value === "string" ? value : JSON.stringify(value);
-      await db.prepare(
-        `INSERT OR REPLACE INTO topology_evidence
-         (evidence_key, content_json, metadata_json, created_at)
-         VALUES (?, ?, ?, ?)`
-      ).bind(
-        key,
-        content,
-        JSON.stringify(options?.customMetadata ?? {}),
-        new Date().toISOString(),
-      ).run();
+      const chunks = splitEvidence(content);
+      const now = new Date().toISOString();
+
+      await db.batch([
+        db.prepare("DELETE FROM topology_evidence_chunk WHERE evidence_key = ?").bind(key),
+        db.prepare(
+          `INSERT OR REPLACE INTO topology_evidence
+           (evidence_key, content_json, metadata_json, created_at)
+           VALUES (?, ?, ?, ?)`
+        ).bind(
+          key,
+          `__chunked__:${chunks.length}`,
+          JSON.stringify({
+            ...(options?.customMetadata ?? {}),
+            storage: "d1-chunked",
+            chunk_count: String(chunks.length),
+            character_count: String(content.length),
+          }),
+          now,
+        ),
+      ]);
+
+      for (let offset = 0; offset < chunks.length; offset += 50) {
+        await db.batch(
+          chunks.slice(offset, offset + 50).map((chunk, index) =>
+            db.prepare(
+              `INSERT INTO topology_evidence_chunk
+               (evidence_key, chunk_index, content_text)
+               VALUES (?, ?, ?)`
+            ).bind(key, offset + index, chunk)
+          )
+        );
+      }
+
       return null as never;
     },
   } as unknown as R2Bucket;
