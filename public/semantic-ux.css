@@ -1,0 +1,201 @@
+/* Semantic UX layer: role-aware hosts, state separation, app grouping, inventory paging. */
+
+.semantic-breadcrumb {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -10px 0 18px;
+  color: var(--muted-strong);
+  font-size: 11px;
+}
+.semantic-breadcrumb strong { color: #dce9f6; font-weight: 700; }
+.semantic-breadcrumb span { color: #5f7893; }
+
+.host-group { grid-column: 1 / -1; margin-bottom: 18px; }
+.host-group + .host-group { margin-top: 6px; }
+.semantic-section-title {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 10px;
+}
+.semantic-section-title > div { display: flex; align-items: baseline; gap: 9px; }
+.semantic-section-title span { font-size: 14px; font-weight: 800; color: #e7f2fc; }
+.semantic-section-title strong { font-size: 11px; color: var(--muted-strong); }
+.semantic-section-title p { margin: 0; font-size: 11px; color: var(--muted-strong); }
+.semantic-host-card.client .metric-row { grid-template-columns: repeat(3, 1fr); }
+.semantic-host-card.client .card-foot { margin-top: 15px; }
+.semantic-host-card.infrastructure { border-color: #31526f; }
+
+.semantic-state-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid rgba(255,255,255,.06);
+}
+.semantic-state-grid > div {
+  min-width: 0;
+  background: #0a1724;
+  border: 1px solid #1d3349;
+  border-radius: 8px;
+  padding: 8px;
+}
+.semantic-state-grid span,
+.semantic-state-grid strong { display: block; }
+.semantic-state-grid span { color: var(--muted-strong); font-size: 10px; }
+.semantic-state-grid strong { margin-top: 3px; color: #e5eef7; font-size: 11px; overflow-wrap: anywhere; }
+
+.semantic-segmented {
+  display: inline-flex;
+  border: 1px solid var(--line-control);
+  border-radius: 10px;
+  padding: 3px;
+  background: #091622;
+}
+.semantic-segmented button {
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-strong);
+  padding: 6px 10px;
+  font-size: 11px;
+}
+.semantic-segmented button.active {
+  background: #183452;
+  color: #fff;
+}
+.semantic-app-card.logical .card-head p { max-width: 340px; }
+.semantic-app-flow {
+  display: flex;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  color: var(--muted-strong);
+  font-size: 11px;
+}
+.semantic-app-flow strong { color: #e7f2fb; }
+
+.semantic-owner { color: #d7e8f9; font-weight: 800; }
+.semantic-technical {
+  display: block;
+  margin-top: 2px;
+  color: #6f88a1;
+  font-size: 10px;
+  letter-spacing: .03em;
+}
+
+.semantic-inventory-summary {
+  display: grid;
+  grid-template-columns: minmax(130px,.7fr) minmax(280px,1.4fr) minmax(320px,1.7fr);
+  gap: 8px;
+  width: min(920px, 100%);
+}
+.semantic-inventory-summary > div {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #1c334a;
+  border-radius: 9px;
+  background: #0a1724;
+}
+.semantic-inventory-summary span,
+.semantic-inventory-summary strong,
+.semantic-inventory-summary small { display: block; }
+.semantic-inventory-summary span { color: var(--muted-strong); font-size: 10px; }
+.semantic-inventory-summary strong { color: #e8f3fd; font-size: 12px; margin-top: 2px; }
+.semantic-inventory-summary small { color: #849bb3; font-size: 10px; margin-top: 2px; line-height: 1.35; }
+
+.semantic-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--line);
+  background: #0b1725;
+}
+.semantic-pager span { color: var(--muted-strong); font-size: 11px; }
+.semantic-pager button { min-height: 34px; padding: 6px 10px; }
+.semantic-pager button:disabled { opacity: .45; cursor: default; }
+
+.semantic-detail-states {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 7px;
+  padding: 12px 14px 0;
+}
+.semantic-detail-states > div {
+  border: 1px solid #1c334a;
+  border-radius: 8px;
+  background: #0a1724;
+  padding: 8px;
+}
+.semantic-detail-states span,
+.semantic-detail-states strong { display: block; }
+.semantic-detail-states span { color: var(--muted-strong); font-size: 10px; }
+.semantic-detail-states strong { margin-top: 3px; font-size: 11px; color: #e7f1fa; }
+
+.semantic-known-routes { width: min(520px, 100%); margin-left: auto; }
+.semantic-known-routes summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  border: 1px solid var(--line-control);
+  border-radius: 9px;
+  padding: 7px 10px;
+  background: #0c1b2a;
+  color: #d8e8f7;
+  font-size: 11px;
+  font-weight: 800;
+}
+.semantic-known-routes summary::-webkit-details-marker { display: none; }
+.semantic-known-routes summary span { color: var(--muted-strong); font-size: 10px; font-weight: 600; }
+.semantic-known-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 7px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #091522;
+  max-height: 280px;
+  overflow: auto;
+}
+.semantic-known-list .route-example {
+  width: 100%;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.semantic-technical-type {
+  display: block;
+  margin: 2px 0 0;
+  color: #718aa4;
+  font-size: 10px;
+  letter-spacing: .04em;
+}
+
+@media (max-width: 1100px) {
+  .semantic-inventory-summary { grid-template-columns: 1fr 1fr; }
+  .semantic-inventory-summary > div:last-child { grid-column: 1 / -1; }
+}
+
+@media (max-width: 760px) {
+  .semantic-section-title { display: block; }
+  .semantic-section-title p { margin-top: 4px; }
+  .semantic-state-grid,
+  .semantic-detail-states,
+  .semantic-inventory-summary { grid-template-columns: 1fr; }
+  .semantic-inventory-summary > div:last-child { grid-column: auto; }
+  .semantic-segmented { width: 100%; }
+  .semantic-segmented button { flex: 1; }
+  .semantic-pager { position: sticky; bottom: 0; z-index: 3; }
+  .semantic-known-routes { width: 100%; margin-left: 0; }
+}
