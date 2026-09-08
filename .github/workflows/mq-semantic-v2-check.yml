@@ -1,0 +1,36 @@
+name: IBM MQ semantic v2 check
+
+on:
+  pull_request:
+    paths:
+      - "collectors/ibm-mq/**"
+      - "services/core/registry/v1.json"
+      - ".github/workflows/mq-semantic-v2-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "collectors/ibm-mq/**"
+      - "services/core/registry/v1.json"
+      - ".github/workflows/mq-semantic-v2-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  semantic-v2:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Python syntax
+        run: |
+          python3 -m py_compile collectors/ibm-mq/normalize_mq_topology.py
+          python3 -m py_compile collectors/ibm-mq/_normalize_mq_observations_impl.py
+          python3 -m py_compile collectors/ibm-mq/mq_cluster_semantics.py
+          python3 -m py_compile collectors/ibm-mq/normalize_mq_observations.py
+          python3 -m py_compile collectors/ibm-mq/test_mq_observation_semantics.py
+
+      - name: Cluster semantic regression
+        run: python3 collectors/ibm-mq/test_mq_observation_semantics.py -v
