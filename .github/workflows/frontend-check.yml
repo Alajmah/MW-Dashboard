@@ -57,7 +57,7 @@ jobs:
           html_ids = set(parser.ids)
           dynamic_ids = set(re.findall(r'(?:\bid|\.id)\s*=\s*["\']([A-Za-z0-9_-]+)["\']', js))
           dynamic_ids |= set(re.findall(r'id=\\?["\']([A-Za-z0-9_-]+)\\?["\']', js))
-          referenced = set(re.findall(r'(?:\$|rq|iq)\("([A-Za-z0-9_-]+)"\)', js))
+          referenced = set(re.findall(r'(?:\$|rq|iq|s\$)\("([A-Za-z0-9_-]+)"\)', js))
           missing = sorted(referenced - html_ids - dynamic_ids)
           if missing:
               raise SystemExit(f"JavaScript references missing HTML/dynamic ids: {missing}")
@@ -118,3 +118,33 @@ jobs:
           if missing:
               raise SystemExit(f"Inventory v2 contract missing: {missing}")
           print("Inventory v2 contract OK")
+
+      - name: Semantic UX contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          js = Path("public/semantic-ux.js")
+          css = Path("public/semantic-ux.css")
+          bridge = Path("public/inventory-v2-bridge.js").read_text()
+          if not js.exists() or not css.exists():
+              raise SystemExit("semantic UX assets are missing")
+          text = js.read_text() + "\n" + css.read_text() + "\n" + bridge
+          required = [
+              'import("/semantic-ux.js")',
+              'Runtime coverage',
+              'Evidence coverage',
+              'Placement confirmed',
+              'Middleware infrastructure',
+              'Observed client hosts',
+              'data-app-mode="logical"',
+              'inventoryPageSize: 200',
+              'Try a known route',
+              'semantic-breadcrumb',
+          ]
+          missing = [item for item in required if item not in text]
+          if missing:
+              raise SystemExit(f"semantic UX contract missing: {missing}")
+          if 'slice(0,700)' in js.read_text().replace(' ', ''):
+              raise SystemExit("semantic UX reintroduced the 700-object inventory cap")
+          print("Semantic UX contract OK")
