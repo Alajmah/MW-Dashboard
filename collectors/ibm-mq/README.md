@@ -1,8 +1,8 @@
 # IBM MQ topology collector
 
-`mq-topology-collector.sh` creates a read-only raw evidence archive for MW-Dashboard. `normalize_mq_topology.py` converts that archive into the normalized topology JSON accepted by the Cloudflare dashboard.
+`mq-topology-collector.sh` creates a read-only raw evidence archive for MW-Dashboard. The preferred vNext path is `normalize_mq_observations.py`, which converts that archive directly into the semantic core's `osi.observation.bundle/v2` contract. `normalize_mq_topology.py` remains available only for compatibility with the current Cloudflare dashboard during migration.
 
-The collector intentionally does **not** construct topology itself. It records IBM MQ configuration and runtime observations in separate files so the normalizer can classify relationships as `configured`, `observed`, or, only when necessary, `inferred`.
+The collector intentionally does **not** construct topology itself. It records IBM MQ configuration and runtime observations in separate files so downstream normalization can preserve configured versus observed evidence and represent collection failures explicitly.
 
 ## Prerequisites
 
@@ -76,9 +76,88 @@ The archive contains host identity, MQ installation/inventory evidence, static q
 
 See [`../../docs/mq-raw-collector-contract-v1.md`](../../docs/mq-raw-collector-contract-v1.md) for the stable archive layout.
 
-## Normalize for MW-Dashboard
+## Preferred vNext normalization
 
-Run the normalizer on a workstation or controlled middleware host; IBM MQ does not need to be installed on the machine doing the normalization:
+Normalize directly to the semantic observation contract on a workstation or controlled middleware host; IBM MQ does not need to be installed on the machine doing the normalization:
+
+```bash
+python3 normalize_mq_observations.py \
+  mq-topology-sjeditb18604-20260908T050000Z.tar.gz \
+  -o mq-observation-bundle-v2.json
+```
+
+Override environment classification when needed:
+
+```bash
+python3 normalize_mq_observations.py archive.tar.gz \
+  --environment prod \
+  -o mq-observation-bundle-v2.json
+```
+
+The adapter reads the `.tar.gz` directly and rejects unsafe archive members through the shared archive reader. It records the raw archive SHA-256 and size in the source run so the semantic import can be traced to immutable evidence.
+
+The direct adapter produces:
+
+```text
+Raw MQ evidence
+  -> source run + coverage
+  -> canonical identity hints
+  -> entity observations
+  -> relation observations
+  -> unresolved references
+```
+
+Key semantics include:
+
+```text
+Host
+  <- runs_on - Queue Manager Instance
+  <- has_instance - Queue Manager
+
+Queue Manager
+  -> contains -> Queue / Channel / Listener / other MQ definitions
+
+Application Instance
+  -> runtime.connects_via -> SVRCONN
+  -> runtime.opens_for_output -> Queue
+  -> runtime.opens_for_input  -> Queue
+
+QREMOTE
+  -> routing.routes_via -> XMITQ
+  -> routing.resolves_to -> destination Queue, when actually collected
+
+XMITQ
+  -> routing.transmits_via -> sender Channel
+```
+
+An uncollected QREMOTE destination is emitted as an explicit unresolved reference. The adapter does not create a fictitious destination queue merely to complete the path.
+
+### Runtime-sample policy
+
+The raw archive can contain multiple samples. For the **current-state** observation bundle, the adapter selects the latest successful sample independently for each runtime command family. Earlier samples remain in the immutable raw archive for future history/time-series processing.
+
+This prevents a handle or connection seen in an earlier sample but absent from the latest successful enumeration from being presented as current merely because it existed somewhere in the archive.
+
+### Queue-handle semantics
+
+`DISPLAY QSTATUS(*) TYPE(HANDLE)` establishes handle access. Therefore:
+
+- `OUTPUT(YES)` becomes `runtime.opens_for_output`
+- input access becomes `runtime.opens_for_input`
+
+These observations do **not** become `activity.put_observed` or `activity.get_observed`. The current collector does not contain evidence proving that a particular MQPUT or MQGET occurred during the sample.
+
+### Coverage and failures
+
+Every relevant MQSC family has explicit coverage. The adapter inspects both the process `.rc` and MQSC output/error text because a `runmqsc` process can complete while individual MQ commands report `AMQ...E` failures.
+
+Coverage is queue-manager scoped where appropriate. For example, if a multi-instance queue manager is reported by `dspmq` as running elsewhere and its MQSC commands fail, another queue manager's successful collection on the same host cannot establish absence for the unavailable queue manager.
+
+Exhaustive configuration enumeration can use `complete` coverage. Runtime enumerations are `point_in_time` and may close earlier runtime assertions only when the adapter explicitly marks that enumeration as absence-authoritative.
+
+## Compatibility normalization
+
+During migration, the existing dashboard can still consume the legacy normalized topology document:
 
 ```bash
 python3 normalize_mq_topology.py \
@@ -86,37 +165,7 @@ python3 normalize_mq_topology.py \
   -o normalized-topology.json
 ```
 
-Override environment classification when needed:
-
-```bash
-python3 normalize_mq_topology.py archive.tar.gz \
-  --environment prod \
-  -o normalized-topology.json
-```
-
-The normalizer reads the `.tar.gz` directly and rejects absolute paths, `..` traversal entries, and symbolic/hard links. It does not extract the archive onto disk.
-
-It creates stable node and edge IDs and currently models:
-
-```text
-Host
-  -> Queue Manager
-  -> Queue / Channel / Listener
-
-Client Host
-  -> Application
-  -> SVRCONN
-  -> Queue
-
-QREMOTE
-  -> XMITQ
-  -> Sender Channel
-  -> Remote Queue Manager / endpoint
-```
-
-Runtime `DISPLAY CHSTATUS` records are used when available to establish observed remote queue-manager names and endpoint addresses. Queue-handle and connection evidence are used for observed application/SVRCONN/queue relationships. Cluster-advertised queues remain configuration evidence.
-
-The resulting JSON conforms to [`../../docs/topology-contract-v1.md`](../../docs/topology-contract-v1.md) and can be uploaded to the MW-Dashboard manual import endpoint/UI.
+That document conforms to [`../../docs/topology-contract-v1.md`](../../docs/topology-contract-v1.md). New semantic-core work should use `normalize_mq_observations.py` instead of adding semantics to the legacy graph format.
 
 ## What is captured
 
@@ -144,13 +193,7 @@ Runtime evidence is captured for every requested sample:
 - Application status when supported by the installed MQ version
 - Cluster queue-manager information
 
-The connection and handle outputs are especially important for reconstructing:
-
-```text
-Host -> Application -> SVRCONN -> Queue
-```
-
-Remote queue, XMITQ, sender-channel, cluster, and channel endpoint definitions provide the configured evidence for extending that path toward the destination queue manager.
+Remote queue, XMITQ, sender-channel, cluster, channel-status, connection, and handle evidence can then be correlated centrally without treating configured reachability as proof of message traffic.
 
 ## Safety properties
 
@@ -176,4 +219,4 @@ Optionally inspect the file list without extracting it:
 tar -tzf mq-topology-*.tar.gz | less
 ```
 
-For the current manual workflow, transfer the `.tar.gz` through your approved method, normalize it, then upload the generated `normalized-topology.json` to the dashboard.
+For the vNext semantic-core workflow, transfer the raw `.tar.gz` through the approved method and normalize it directly to `mq-observation-bundle-v2.json`. Use the legacy normalized topology only while the current Cloudflare UI remains on its compatibility path.
