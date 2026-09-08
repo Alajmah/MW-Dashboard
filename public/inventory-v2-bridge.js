@@ -21,3 +21,5 @@ if (rows) {
 document.addEventListener("click", event => {
   if (event.target.closest('[data-view="inventory"], #jumpInventory')) requestInventoryV2Refresh();
 });
+
+import("/semantic-ux.js").catch(error => console.error("Semantic UX layer failed to load", error));
