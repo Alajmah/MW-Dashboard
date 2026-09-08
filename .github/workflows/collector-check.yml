@@ -33,6 +33,7 @@ jobs:
         run: |
           python3 -m py_compile collectors/ibm-mq/normalize_mq_topology.py
           python3 -m py_compile collectors/ibm-mq/_normalize_mq_observations_impl.py
+          python3 -m py_compile collectors/ibm-mq/mq_cluster_semantics.py
           python3 -m py_compile collectors/ibm-mq/normalize_mq_observations.py
 
       - name: Help path
@@ -183,7 +184,7 @@ jobs:
           assert data['schema_version']=='osi.observation.bundle/v2'
           assert data['run']['source']['kind']=='ibm_mq_host'
           assert data['run']['artifact']['sha256']
-          assert data['run']['normalizer_version']=='3.0.1', data['run']['normalizer_version']
+          assert data['run']['normalizer_version']=='3.1.0', data['run']['normalizer_version']
           assert data['run']['metadata']['normalization_policy']=='latest-successful-runtime-sample-for-current-state'
 
           entities={item['ref']: item for item in data['entities']}
@@ -214,12 +215,16 @@ jobs:
           assert len(failed)==1 and failed[0]['mode']=='failed', failed
           assert 'AMQ8146E' in failed[0].get('error',''), failed
 
-          cluster=[c for c in data['coverage'] if c['scope_type']=='queue_manager' and c['scope_key']=='QM_EXT' and c['object_class']=='relation:mq.cluster_discovers']
-          assert len(cluster)==1 and cluster[0]['mode']=='point_in_time', cluster
-          assert cluster[0]['properties'].get('empty_result') is True, cluster
-          assert cluster[0]['properties'].get('process_rc')==10, cluster
-          assert cluster[0]['properties'].get('mq_message_codes')==['AMQ8147E'], cluster
-          assert cluster[0]['properties'].get('absence_closes_assertions') is True, cluster
+          cluster_queue=[c for c in data['coverage'] if c['scope_type']=='queue_manager' and c['scope_key']=='QM_EXT' and c['object_class']=='relation:mq.cluster_discovers:queue']
+          cluster_qmgr=[c for c in data['coverage'] if c['scope_type']=='queue_manager' and c['scope_key']=='QM_EXT' and c['object_class']=='relation:mq.cluster_discovers:queue_manager']
+          for cluster, target_type in ((cluster_queue,'mq.queue'),(cluster_qmgr,'mq.queue_manager')):
+              assert len(cluster)==1 and cluster[0]['mode']=='point_in_time', cluster
+              assert cluster[0]['properties'].get('empty_result') is True, cluster
+              assert cluster[0]['properties'].get('process_rc')==10, cluster
+              assert cluster[0]['properties'].get('mq_message_codes')==['AMQ8147E'], cluster
+              assert cluster[0]['properties'].get('absence_closes_assertions') is True, cluster
+              assert cluster[0]['properties'].get('relationship_type')=='mq.cluster_discovers', cluster
+              assert cluster[0]['properties'].get('target_type')==target_type, cluster
 
           reltypes={rel['semantic_type'] for rel in data['relations']}
           assert 'runtime.opens_for_output' in reltypes
@@ -240,6 +245,7 @@ jobs:
           selected=data['run']['metadata']['selected_runtime_samples']['QM_EXT']
           assert selected['connections'].startswith('sample_002_'), selected
           assert selected['queue-handles'].startswith('sample_002_'), selected
+          assert selected['cluster-qmgrs'].startswith('sample_002_'), selected
 
           # Directly exercise the second real-estate empty form (AMQ8933I).
           sys.path.insert(0, os.path.join(os.getcwd(), 'collectors', 'ibm-mq'))
