@@ -10,8 +10,9 @@ import re
 
 import _normalize_mq_observations_impl as _impl
 from _normalize_mq_observations_impl import *  # noqa: F401,F403
+from mq_cluster_semantics import enrich as enrich_cluster_semantics
 
-NORMALIZER_VERSION = "3.0.1"
+NORMALIZER_VERSION = "3.1.0"
 _impl.NORMALIZER_VERSION = NORMALIZER_VERSION
 
 MQ_MESSAGE_RE = re.compile(r"\b(AMQ\d{4}[A-Z]):\s*([^\r\n]*)", re.IGNORECASE)
@@ -127,11 +128,41 @@ _impl.command_health = command_health
 
 
 def normalize(archive_path, environment=None):
-    return _impl.normalize(archive_path, environment)
+    bundle = _impl.normalize(archive_path, environment)
+    archive = _impl.Archive(archive_path)
+    try:
+        enrich_cluster_semantics(bundle, archive, _impl)
+        bundle["run"]["normalizer_version"] = NORMALIZER_VERSION
+        return bundle
+    finally:
+        archive.tf.close()
 
 
 def main():
-    return _impl.main()
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(description="Normalize a raw IBM MQ collector archive directly to ObservationBundle v2")
+    parser.add_argument("archive", help="mq-topology-*.tar.gz raw collector archive")
+    parser.add_argument("-o", "--output", default="mq-observation-bundle-v2.json")
+    parser.add_argument("--environment")
+    args = parser.parse_args()
+
+    bundle = normalize(args.archive, args.environment)
+    with open(args.output, "w", encoding="utf-8") as fh:
+        json.dump(bundle, fh, indent=2, sort_keys=False)
+        fh.write("\n")
+    print(json.dumps({
+        "output": args.output,
+        "schema_version": bundle["schema_version"],
+        "run_id": bundle["run"]["run_id"],
+        "environment": bundle["run"]["environment"],
+        "normalizer_version": bundle["run"].get("normalizer_version"),
+        "coverage": len(bundle["coverage"]),
+        "entities": len(bundle["entities"]),
+        "relations": len(bundle["relations"]),
+        "unresolved_references": len(bundle["unresolved_references"]),
+    }, indent=2))
 
 
 if __name__ == "__main__":
