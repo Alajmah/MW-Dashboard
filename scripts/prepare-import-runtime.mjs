@@ -23,6 +23,7 @@ for (const [source, name] of copies) {
 
 const pyodideRoot = join(root, "node_modules", "pyodide");
 const pyodideFiles = [
+  "pyodide.mjs",
   "pyodide.js",
   "pyodide.asm.mjs",
   "pyodide.asm.wasm",
@@ -38,11 +39,21 @@ for (const name of pyodideFiles) {
 }
 
 const importWorker = await readFile(join(root, "public", "import-worker.js"), "utf8");
+const importPage = await readFile(join(root, "public", "admin-import.js"), "utf8");
 if (importWorker.includes("cdn.jsdelivr.net")) {
   throw new Error("Browser import worker must not depend on jsDelivr at runtime");
 }
 if (!importWorker.includes("/import-runtime/pyodide/")) {
   throw new Error("Browser import worker must load Pyodide from same-origin /import-runtime/pyodide/");
+}
+if (importWorker.includes("importScripts(")) {
+  throw new Error("Pyodide 314 requires a module Web Worker; importScripts is not supported");
+}
+if (!importWorker.includes("pyodide.mjs")) {
+  throw new Error("Browser import worker must load the Pyodide ES module entry point");
+}
+if (!importPage.includes('new Worker("/import-worker.js", { type: "module" })')) {
+  throw new Error("Admin importer must launch the normalizer as a module Web Worker");
 }
 
 console.log(`Prepared ${copies.length} semantic runtime files and ${pyodideFiles.length} self-hosted Pyodide assets in ${target}`);
