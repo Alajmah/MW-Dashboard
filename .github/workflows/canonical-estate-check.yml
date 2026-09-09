@@ -1,0 +1,163 @@
+name: Canonical estate check
+
+on:
+  pull_request:
+    paths:
+      - "src/bootstrap.ts"
+      - "src/current-observations.ts"
+      - "src/semantic-estate.ts"
+      - "src/import-auth.ts"
+      - "migrations/**"
+      - "public/admin-import.*"
+      - "public/estate-builder.js"
+      - "scripts/test-estate-builder.mjs"
+      - "services/core/registry/**"
+      - ".github/workflows/canonical-estate-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/bootstrap.ts"
+      - "src/current-observations.ts"
+      - "src/semantic-estate.ts"
+      - "src/import-auth.ts"
+      - "migrations/**"
+      - "public/admin-import.*"
+      - "public/estate-builder.js"
+      - "scripts/test-estate-builder.mjs"
+      - "services/core/registry/**"
+      - ".github/workflows/canonical-estate-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Prepare browser runtime
+        run: npm run prepare:import-runtime
+
+      - name: Test browser canonical reconciler
+        run: node scripts/test-estate-builder.mjs
+
+      - name: JavaScript syntax
+        run: |
+          node --check public/admin-import.js
+          node --check public/estate-builder.js
+
+      - name: Type check Worker
+        run: npm run check
+
+      - name: Apply local D1 migrations
+        run: npm run db:migrate:local
+
+      - name: Start local Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler dev --local --port 8787 --var ADMIN_IMPORT_TOKEN:ci-token > /tmp/wrangler-estate.log 2>&1 &
+          echo $! > /tmp/wrangler-estate.pid
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8787/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/wrangler-estate.log
+          exit 1
+
+      - name: Exercise canonical estate lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H 'Authorization: Bearer ci-token' -H 'Content-Type: application/json')
+          import_base='http://127.0.0.1:8787/api/v2/import'
+          estate_base='http://127.0.0.1:8787/api/v2/estate'
+
+          create_source() {
+            local run_id="$1" source_id="$2" qm_ref="$3" queue_ref="$4" rel_ref="$5"
+            cat > /tmp/source-manifest.json <<JSON
+          {
+            "schema_version":"osi.observation.bundle/v2",
+            "run_id":"$run_id",
+            "environment":"ci",
+            "collector":"synthetic",
+            "collector_version":"1",
+            "normalizer_version":"3.1.0",
+            "completed_at":"2026-09-09T00:00:00Z",
+            "source":{"kind":"ibm_mq_host","id":"$source_id","display_name":"$source_id"},
+            "archive":{"filename":"ci.tar.gz","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":100},
+            "bundle_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "counts":{"coverage":0,"entities":2,"relations":1,"unresolved":0},
+            "quality":{"valid":true}
+          }
+          JSON
+            local created revision
+            created="$(curl --fail --silent "${auth[@]}" -X POST --data @/tmp/source-manifest.json "$import_base/revisions")"
+            revision="$(python -c 'import json,sys; print(json.load(sys.stdin)["revision_id"])' <<<"$created")"
+            curl --fail --silent "${auth[@]}" -X POST --data "{\"start\":0,\"items\":[{\"ref\":\"$qm_ref\",\"semantic_type\":\"mq.queue_manager\",\"identity\":{\"hints\":{\"name\":\"QM1\",\"qmid\":\"QM1_2026\"}},\"display_name\":\"QM1\",\"evidence_class\":\"observed\",\"properties\":{}},{\"ref\":\"$queue_ref\",\"semantic_type\":\"mq.queue\",\"identity\":{\"hints\":{\"queue_manager_key\":\"QM1\",\"name\":\"Q.SHARED\"}},\"display_name\":\"Q.SHARED\",\"evidence_class\":\"configured\",\"properties\":{}}]}" "$import_base/revisions/$revision/entities" >/dev/null
+            curl --fail --silent "${auth[@]}" -X POST --data "{\"start\":0,\"items\":[{\"ref\":\"$rel_ref\",\"semantic_type\":\"contains\",\"source_ref\":\"$qm_ref\",\"target_ref\":\"$queue_ref\",\"evidence_class\":\"configured\",\"properties\":{}}]}" "$import_base/revisions/$revision/relations" >/dev/null
+            curl --fail --silent "${auth[@]}" -X POST --data '{}' "$import_base/revisions/$revision/activate"
+          }
+
+          a="$(create_source 'ci:estate:a1' 'host-a' 'qa' 'q1a' 'ra')"
+          a_id="$(python -c 'import json,sys; print(json.load(sys.stdin)["revision_id"])' <<<"$a")"
+          b="$(create_source 'ci:estate:b1' 'host-b' 'qb' 'q1b' 'rb')"
+          b_id="$(python -c 'import json,sys; print(json.load(sys.stdin)["revision_id"])' <<<"$b")"
+
+          first_page="$(curl --fail --silent -H 'Authorization: Bearer ci-token' 'http://127.0.0.1:8787/api/v2/observations/current/entities?limit=1&offset=0')"
+          printf '%s\n' "$first_page" | grep -Fq '"next_offset": 1'
+          all_rel="$(curl --fail --silent -H 'Authorization: Bearer ci-token' 'http://127.0.0.1:8787/api/v2/observations/current/relations?limit=100&offset=0')"
+          rel_count="$(python -c 'import json,sys; print(len(json.load(sys.stdin)["items"]))' <<<"$all_rel")"
+          test "$rel_count" = "2"
+
+          source_set_json="$(printf '%s\n%s\n' "$a_id" "$b_id" | sort | python -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
+          source_hash="$(python - "$source_set_json" <<'PY'
+          import hashlib, json, sys
+          ids=sorted(json.loads(sys.argv[1]))
+          print(hashlib.sha256("\n".join(ids).encode()).hexdigest())
+          PY
+          )"
+
+          cat > /tmp/estate-manifest.json <<JSON
+          {
+            "source_revision_ids":$source_set_json,
+            "source_set_hash":"$source_hash",
+            "counts":{"entities":2,"relations":1,"unresolved":0},
+            "quality":{"valid":true,"source_count":2}
+          }
+          JSON
+          estate_created="$(curl --fail --silent "${auth[@]}" -X POST --data @/tmp/estate-manifest.json "$estate_base/revisions")"
+          estate_id="$(python -c 'import json,sys; print(json.load(sys.stdin)["estate_revision_id"])' <<<"$estate_created")"
+          curl --fail --silent "${auth[@]}" -X POST --data '{"items":[{"entity_id":"ce-qm","semantic_type":"mq.queue_manager","identity_rule":"qmid","identity_key":"qm1_2026","identity_state":"resolved","display_name":"QM1","properties":{},"evidence_classes":["observed"],"source_ids":["host-a","host-b"],"source_observations":[],"evidence_count":2,"source_count":2},{"entity_id":"ce-q","semantic_type":"mq.queue","identity_rule":"rule_1","identity_key":"queue_manager_key=qm1|name=q.shared","identity_state":"resolved","display_name":"Q.SHARED","properties":{},"evidence_classes":["configured"],"source_ids":["host-a","host-b"],"source_observations":[],"evidence_count":2,"source_count":2}]}' "$estate_base/revisions/$estate_id/entities" >/dev/null
+          curl --fail --silent "${auth[@]}" -X POST --data '{"items":[{"relation_id":"cr1","semantic_type":"contains","source_entity_id":"ce-qm","target_entity_id":"ce-q","properties":{},"evidence_classes":["configured"],"source_ids":["host-a","host-b"],"source_observations":[],"evidence_count":2,"source_count":2}]}' "$estate_base/revisions/$estate_id/relations" >/dev/null
+          activated="$(curl --fail --silent "${auth[@]}" -X POST --data '{}' "$estate_base/revisions/$estate_id/activate")"
+          printf '%s\n' "$activated" | grep -Fq '"status": "ACTIVE"'
+          status_json="$(curl --fail --silent "$estate_base/status")"
+          printf '%s\n' "$status_json" | grep -Fq '"estate_fresh": true'
+          printf '%s\n' "$status_json" | grep -Fq '"entity_count": 2'
+
+          stale_created="$(curl --fail --silent "${auth[@]}" -X POST --data @/tmp/estate-manifest.json "$estate_base/revisions")"
+          stale_id="$(python -c 'import json,sys; print(json.load(sys.stdin)["estate_revision_id"])' <<<"$stale_created")"
+          a2="$(create_source 'ci:estate:a2' 'host-a' 'qa2' 'q1a2' 'ra2')"
+          printf '%s\n' "$a2" | grep -Fq "\"previous_revision_id\": \"$a_id\""
+
+          code="$(curl --silent --output /tmp/stale.json --write-out '%{http_code}' "${auth[@]}" -X POST --data '{}' "$estate_base/revisions/$stale_id/activate")"
+          test "$code" = "409"
+          grep -Fq 'Current source set changed while canonical estate was being built' /tmp/stale.json
+          stale_status="$(curl --fail --silent "$estate_base/status")"
+          printf '%s\n' "$stale_status" | grep -Fq '"estate_fresh": false'
+
+      - name: Stop local Worker
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f /tmp/wrangler-estate.pid ]]; then kill "$(cat /tmp/wrangler-estate.pid)" || true; fi
+          tail -100 /tmp/wrangler-estate.log || true
