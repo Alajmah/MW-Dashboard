@@ -1,5 +1,6 @@
 import app from "./index";
 import { importAuthorizationDenial } from "./import-auth";
+import { handleSemanticEstate } from "./semantic-estate";
 import { handleSemanticImport } from "./semantic-import";
 
 interface Env {
@@ -78,6 +79,12 @@ export default {
       ADMIN_IMPORT_TOKEN: env.ADMIN_IMPORT_TOKEN,
     });
     if (semanticImport) return semanticImport;
+
+    const semanticEstate = await handleSemanticEstate(request, {
+      DB: env.DB,
+      ADMIN_IMPORT_TOKEN: env.ADMIN_IMPORT_TOKEN,
+    });
+    if (semanticEstate) return semanticEstate;
 
     return app.fetch(request, {
       DB: env.DB,
