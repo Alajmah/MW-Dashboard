@@ -1,0 +1,67 @@
+name: Operations terminal UI check
+
+on:
+  pull_request:
+    paths:
+      - "public/index.html"
+      - "public/operations-terminal.css"
+      - ".github/workflows/operations-terminal-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/index.html"
+      - "public/operations-terminal.css"
+      - ".github/workflows/operations-terminal-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Verify operations terminal contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          html = Path("public/index.html").read_text()
+          css_path = Path("public/operations-terminal.css")
+          if not css_path.exists() or not css_path.read_text().strip():
+              raise SystemExit("operations-terminal.css is missing or empty")
+          css = css_path.read_text()
+
+          required_html = [
+              'href="/operations-terminal.css"',
+              'id="overviewStats"',
+              'id="inventoryRows"',
+              'id="detailContent"',
+              'id="routeForm"',
+          ]
+          required_css = [
+              '--mono:',
+              '--accent:#5cc8ff',
+              '.stats{',
+              '.object-detail{',
+              '.route-workbench{',
+              'tbody td:nth-child(2)',
+              'content:"Logical owner"',
+              '@media(max-width:760px)',
+              '@media(prefers-reduced-motion:reduce)',
+          ]
+          missing = [x for x in required_html if x not in html] + [x for x in required_css if x not in css]
+          if missing:
+              raise SystemExit(f"operations terminal contract missing: {missing}")
+
+          if 'url(http://' in css or 'url(https://' in css or '@import url(' in css:
+              raise SystemExit("operations terminal must not depend on external visual assets")
+          if css.count('{') != css.count('}'):
+              raise SystemExit("operations terminal stylesheet has unbalanced braces")
+          if 'box-shadow:0 0 14px' in css:
+              raise SystemExit("operations terminal reintroduced decorative status glow")
+
+          print("Operations terminal UI contract OK")
