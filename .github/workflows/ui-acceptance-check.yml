@@ -50,6 +50,8 @@ jobs:
               '#view-overview .section-block.two-col',
               '.route-suggestion.keyboard-active',
               '↑/↓ navigate · Enter select · Esc close',
+              'subtree: false',
+              'resultsReplaced',
           ]
           missing = [item for item in required if item not in combined]
           if missing:
@@ -57,5 +59,9 @@ jobs:
 
           if '/api/v1/topology/current' in js:
               raise SystemExit("acceptance UI must not reintroduce legacy full-graph loading")
+
+          dangerous = 'observer.observe(results, { childList: true, subtree: true, attributes: true'
+          if dangerous in js:
+              raise SystemExit("route combobox must not observe descendant class mutations; this causes a MutationObserver feedback loop")
 
           print("UI acceptance contract OK")
