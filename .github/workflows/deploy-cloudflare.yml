@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Prepare browser import runtime
+        run: npm run prepare:import-runtime
+
       - name: Type check
         run: npm run check
 
@@ -50,3 +53,11 @@ jobs:
           response="$(curl --fail --silent --show-error --retry 5 --retry-delay 2 https://mw-dashboard.saeedm309.workers.dev/health)"
           printf '%s\n' "$response"
           printf '%s\n' "$response" | grep -Fq '"status": "ok"'
+
+      - name: Smoke test semantic import status
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 5 --retry-delay 2 https://mw-dashboard.saeedm309.workers.dev/api/v2/import/status)"
+          printf '%s\n' "$response"
+          printf '%s\n' "$response" | grep -Fq '"database_ready": true'
