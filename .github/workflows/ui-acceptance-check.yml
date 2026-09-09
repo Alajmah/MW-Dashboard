@@ -62,6 +62,11 @@ jobs:
               '#view-routes .route-workbench:focus-within',
               '#view-routes .route-suggestions.open{z-index:1000',
               '#view-routes .route-results-v2{position:relative;z-index:1',
+              'function routeSearchMatch',
+              'query.length < 4',
+              'matched canonical identity',
+              'limit=50',
+              'No visible route endpoint names match this search',
           ]
           missing = [item for item in required if item not in combined]
           if missing:
