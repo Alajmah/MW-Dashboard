@@ -17,7 +17,6 @@ jobs:
   deploy:
     name: Deploy MW Dashboard
     runs-on: ubuntu-latest
-    environment: production
 
     steps:
       - name: Checkout
@@ -48,9 +47,9 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
 
-      # ADMIN_IMPORT_TOKEN is optional during rollout. When the repository secret
-      # is present, synchronize it into the Worker. When absent, semantic publish
-      # remains disabled while browser-local analysis continues to work.
+      # ADMIN_IMPORT_TOKEN is sourced from repository secrets only. Do not attach
+      # this job to a GitHub Environment with an identically named secret because
+      # environment secrets would shadow the repository value used by the operator.
       - name: Sync optional semantic import secret
         shell: bash
         env:
@@ -66,9 +65,8 @@ jobs:
             echo "ADMIN_IMPORT_TOKEN is not configured; semantic publishing remains disabled."
           fi
 
-      # Prove that the exact GitHub secret value resolves through the deployed
-      # Worker auth boundary. The optional-secret branch is handled in shell
-      # because GitHub does not allow secrets.* directly in step-level if clauses.
+      # Prove that the exact repository secret resolves through the deployed
+      # Worker auth boundary without printing or otherwise exposing the token.
       - name: Smoke test semantic import authorization
         shell: bash
         env:
@@ -81,7 +79,7 @@ jobs:
               https://mw-dashboard.saeedm309.workers.dev/api/v2/import/sources)"
             printf '%s\n' "$response"
             printf '%s\n' "$response" | grep -Fq '"sources"'
-            echo "Deployed semantic import authorization accepted the configured GitHub secret."
+            echo "Deployed semantic import authorization accepted the repository secret."
           else
             echo "ADMIN_IMPORT_TOKEN is not configured; authorization smoke test skipped."
           fi
