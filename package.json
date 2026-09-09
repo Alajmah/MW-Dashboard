@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prepare:import-runtime": "node scripts/prepare-import-runtime.mjs",
+    "predev": "npm run prepare:import-runtime",
     "dev": "wrangler dev",
+    "predeploy": "npm run prepare:import-runtime",
     "deploy": "wrangler deploy",
     "cf-typegen": "wrangler types",
     "check": "tsc --noEmit",
