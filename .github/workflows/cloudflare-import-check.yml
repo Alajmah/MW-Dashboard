@@ -94,7 +94,7 @@ jobs:
               'href="/admin-import.css"',
               'raw <code>.tar.gz</code>',
               'Atomic per-source activation',
-              'Pyodide 314.0.6',
+              'const PYODIDE_VERSION = "314.0.6"',
               'normalize_mq_observations.normalize',
               '/api/v2/import/revisions',
               'prefers-reduced-motion',
