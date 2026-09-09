@@ -4,11 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="color-scheme" content="dark" />
-  <title>MW Dashboard · Topology Explorer</title>
+  <title>MW Dashboard · Operational Intelligence</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/routes-v2.css" />
   <link rel="stylesheet" href="/readability.css" />
-  <link rel="stylesheet" href="/inventory-v2.css" />
+  <link rel="stylesheet" href="/estate-ui.css" />
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Skip to content</a>
@@ -24,26 +24,26 @@
         <button class="nav-item" data-view="middleware">Middleware</button>
         <button class="nav-item" data-view="applications">Applications</button>
         <button class="nav-item" data-view="routes">Routes</button>
-        <button class="nav-item" data-view="inventory">Inventory</button>
+        <button class="nav-item" data-view="inventory">Explore</button>
         <button class="nav-item" data-view="snapshots">Snapshots</button>
         <button class="nav-item" data-view="administration">Administration</button>
       </nav>
       <div class="sidebar-foot">
         <span class="status-dot"></span>
-        <div><small>Active snapshot</small><strong id="sidebarSnapshot">None</strong></div>
+        <div><small>Canonical estate</small><strong id="sidebarSnapshot">Loading…</strong></div>
       </div>
     </aside>
 
     <main class="main" id="mainContent">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Topology Explorer v2</p>
+          <p class="eyebrow">Operational Intelligence</p>
           <h1 id="pageTitle">Overview</h1>
-          <p id="pageSubtitle">Operational view of physical placement, logical ownership and middleware relationships.</p>
+          <p id="pageSubtitle">Canonical operational view of physical placement, logical ownership, evidence quality and unresolved gaps.</p>
         </div>
         <div class="top-actions">
-          <div class="snapshot-chip"><span>Snapshot</span><strong id="snapshotBadge">No active snapshot</strong><small id="snapshotAge"></small></div>
-          <button id="jumpInventory" class="secondary" type="button">Search inventory</button>
+          <div class="snapshot-chip"><span>Estate</span><strong id="snapshotBadge">Loading canonical estate</strong><small id="snapshotAge"></small></div>
+          <button id="jumpInventory" class="secondary" type="button">Explore estate</button>
         </div>
       </header>
 
@@ -67,11 +67,11 @@
         </section>
         <section class="section-block two-col">
           <div class="panel">
-            <div class="section-heading compact-heading"><div><p class="section-kicker">Coverage</p><h2>Evidence model</h2></div></div>
+            <div class="section-heading compact-heading"><div><p class="section-kicker">Identity quality</p><h2>Canonical reconciliation</h2></div></div>
             <div id="evidenceSummary" class="evidence-summary"></div>
           </div>
           <div class="panel">
-            <div class="section-heading compact-heading"><div><p class="section-kicker">Placement gaps</p><h2>Unresolved infrastructure</h2></div></div>
+            <div class="section-heading compact-heading"><div><p class="section-kicker">Evidence gaps</p><h2>Unresolved infrastructure</h2></div></div>
             <div id="placementGaps" class="gap-list"></div>
           </div>
         </section>
@@ -131,7 +131,7 @@
           </form>
           <div class="route-help">
             <div class="route-help-copy"><strong>How to read the result:</strong> the main journey is the logical delivery chain. When a QREMOTE is involved, its XMITQ → sender channel → endpoint → remote queue manager transport is expanded underneath that hop. Observed, configured and inferred evidence stay visibly separate.</div>
-            <div id="routeSuggestions" class="route-quick"><span>Loading known evidence…</span></div>
+            <div id="routeSuggestions" class="route-quick"><span>Open Routes to load route evidence…</span></div>
           </div>
         </section>
         <section class="panel route-results-v2">
@@ -142,29 +142,29 @@
 
       <section id="view-inventory" class="view" data-view-panel="inventory">
         <div class="toolbar panel inventory-toolbar">
-          <label class="search-box"><span>Search inventory</span><input id="inventorySearch" type="search" placeholder="Name, IP, scope, metadata..." /></label>
-          <label class="select-box"><span>Type</span><select id="inventoryType"><option value="">All types</option></select></label>
-          <label class="select-box"><span>Server</span><select id="inventoryServer"><option value="">All servers</option></select></label>
-          <label class="select-box"><span>Logical owner</span><select id="inventoryOwner"><option value="">All owners</option></select></label>
+          <label class="search-box"><span>Search canonical estate</span><input id="inventorySearch" type="search" placeholder="Name or canonical identity..." /></label>
+          <label class="select-box"><span>Semantic type</span><select id="inventoryType"><option value="">All semantic types</option></select></label>
+          <label class="select-box"><span>Identity</span><select id="inventoryServer"><option value="">All identity states</option></select></label>
+          <label class="select-box"><span>Page size</span><select id="inventoryOwner"><option value="50">50 rows</option></select></label>
           <button id="inventoryReset" class="ghost" type="button">Reset</button>
         </div>
         <div class="inventory-layout">
           <section class="panel inventory-panel">
-            <div class="section-heading compact-heading"><div><h2>Objects</h2><p id="inventoryCount"></p></div></div>
+            <div class="section-heading compact-heading"><div><h2>Canonical entities</h2><p id="inventoryCount"></p></div></div>
             <div class="table-wrap">
               <table>
-                <thead><tr><th>Type</th><th>Name</th><th>Logical owner</th><th>Current / observed server</th><th>Status</th></tr></thead>
+                <thead><tr><th>Type</th><th>Name</th><th>Logical owner</th><th>Current / observed server</th><th>Evidence</th></tr></thead>
                 <tbody id="inventoryRows"></tbody>
               </table>
             </div>
           </section>
           <aside class="panel object-detail">
-            <div id="detailEmpty" class="detail-empty"><span>↗</span><h2>Object details</h2><p>Select an inventory row to inspect ownership, placement, evidence and relationships.</p></div>
+            <div id="detailEmpty" class="detail-empty"><span>↗</span><h2>Entity details</h2><p>Select a canonical entity to inspect identity, ownership, placement, provenance and semantic relationships.</p></div>
             <div id="detailContent" hidden>
               <div class="detail-head"><div><span id="detailType" class="pill"></span><h2 id="detailName"></h2><p id="detailScope"></p></div><button id="closeDetail" class="icon-button" type="button">×</button></div>
               <div id="detailFacts" class="fact-grid"></div>
               <div class="detail-section"><h3>Relationships</h3><div id="detailRelationships" class="relationship-list"></div></div>
-              <div class="detail-section"><h3>Metadata</h3><dl id="detailMetadata" class="metadata-list"></dl></div>
+              <div class="detail-section"><h3>Properties & provenance</h3><dl id="detailMetadata" class="metadata-list"></dl></div>
             </div>
           </aside>
         </div>
@@ -194,9 +194,7 @@
       </section>
     </main>
   </div>
-  <script src="/app.js" type="module"></script>
-  <script src="/routes-v2.js" type="module"></script>
-  <script src="/inventory-v2.js" type="module"></script>
-  <script src="/inventory-v2-bridge.js" type="module"></script>
+  <script src="/shell.js" type="module"></script>
+  <script src="/estate-ui.js" type="module"></script>
 </body>
 </html>
