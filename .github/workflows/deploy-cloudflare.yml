@@ -99,3 +99,11 @@ jobs:
           response="$(curl --fail --silent --show-error --retry 8 --retry-all-errors --retry-delay 2 https://mw-dashboard.saeedm309.workers.dev/api/v2/import/status)"
           printf '%s\n' "$response"
           printf '%s\n' "$response" | grep -Fq '"database_ready": true'
+
+      - name: Smoke test canonical estate status
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 8 --retry-all-errors --retry-delay 2 https://mw-dashboard.saeedm309.workers.dev/api/v2/estate/status)"
+          printf '%s\n' "$response"
+          printf '%s\n' "$response" | grep -Fq '"database_ready": true'

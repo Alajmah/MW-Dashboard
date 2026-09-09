@@ -22,11 +22,11 @@
   <main id="mainContent" class="page-shell">
     <section class="intro-card">
       <div>
-        <p class="eyebrow">Browser-local normalization</p>
-        <h2>Turn a transferred MQ collector archive into a semantic source revision.</h2>
+        <p class="eyebrow">Browser-local normalization and reconciliation</p>
+        <h2>Turn transferred middleware evidence into a canonical operational estate.</h2>
         <p class="lede">
-          Archive parsing and IBM MQ normalization run locally in this browser. The raw <code>.tar.gz</code>
-          is not uploaded by this release. Only the validated ObservationBundle v2 records are sent to Cloudflare D1 when you publish.
+          Archive parsing, IBM MQ normalization, and cross-source identity reconciliation run locally in this browser.
+          The raw <code>.tar.gz</code> evidence is not uploaded. Cloudflare D1 stores validated source observations and atomic canonical estate revisions.
         </p>
       </div>
       <div class="guardrail-list" aria-label="Import guardrails">
@@ -34,6 +34,7 @@
         <span>SHA-256 fingerprinted</span>
         <span>Semantic registry validated</span>
         <span>Atomic per-source activation</span>
+        <span>Atomic canonical estate activation</span>
       </div>
     </section>
 
@@ -73,9 +74,10 @@
         </div>
 
         <label class="field-label" for="adminToken">ADMIN_IMPORT_TOKEN</label>
-        <input id="adminToken" class="text-input" type="password" autocomplete="off" placeholder="Required only when publishing">
-        <p class="field-note">The token is not stored in localStorage or sent anywhere except authenticated import API calls.</p>
+        <input id="adminToken" class="text-input" type="password" autocomplete="off" placeholder="Required for protected operations">
+        <p class="field-note">The token is not stored in localStorage or sent anywhere except authenticated import and reconciliation API calls.</p>
 
+        <button id="verifyTokenButton" class="button ghost" type="button">Verify admin token</button>
         <button id="publishButton" class="button primary" type="button" disabled>Publish validated revision</button>
         <div id="publishResult" class="publish-result" hidden></div>
       </section>
@@ -108,12 +110,12 @@
 
       <div class="metrics-grid" aria-label="Semantic bundle counts">
         <div class="metric"><span>Coverage</span><strong id="coverageCount">0</strong></div>
-        <div class="metric"><span>Entities</span><strong id="entityCount">0</strong></div>
-        <div class="metric"><span>Relations</span><strong id="relationCount">0</strong></div>
-        <div class="metric"><span>Unresolved</span><strong id="unresolvedCount">0</strong></div>
+        <div class="metric"><span>Entity observations</span><strong id="entityCount">0</strong></div>
+        <div class="metric"><span>Relation observations</span><strong id="relationCount">0</strong></div>
+        <div class="metric"><span>Unresolved observations</span><strong id="unresolvedCount">0</strong></div>
         <div class="metric"><span>Failed coverage</span><strong id="failedCoverageCount">0</strong></div>
-        <div class="metric"><span>Queue managers</span><strong id="qmCount">0</strong></div>
-        <div class="metric"><span>Channels</span><strong id="channelCount">0</strong></div>
+        <div class="metric"><span>QM observations</span><strong id="qmCount">0</strong></div>
+        <div class="metric"><span>Channel observations</span><strong id="channelCount">0</strong></div>
         <div class="metric"><span>Physical hosts</span><strong id="hostCount">0</strong></div>
         <div class="metric"><span>Activity claims</span><strong id="activityCount">0</strong></div>
       </div>
@@ -124,11 +126,27 @@
       </div>
     </section>
 
+    <section id="estatePanel" class="panel result-panel" aria-labelledby="estateHeading">
+      <div class="panel-heading">
+        <div>
+          <p class="step-label">03 · Reconcile</p>
+          <h2 id="estateHeading">Build canonical estate</h2>
+        </div>
+        <span class="badge">Cross-source</span>
+      </div>
+      <p class="field-note">
+        Reads every current semantic source revision in pages, applies registry identity rules locally, collapses duplicate observations,
+        preserves source provenance, and activates the result only if the source set has not changed while reconciliation was running.
+      </p>
+      <button id="reconcileButton" class="button primary" type="button">Reconcile current sources</button>
+      <div id="estateResult" class="publish-result" hidden></div>
+    </section>
+
     <section class="boundary-panel">
       <h2>Current phase boundary</h2>
       <p>
-        Activating a source revision does <strong>not</strong> replace the existing legacy dashboard snapshot.
-        Multiple MQ hosts can therefore be imported independently. The next vNext slice will reconcile the current source revisions into one canonical estate projection before the UI switches data planes.
+        Source revisions and the canonical estate are now separate atomic layers. The existing dashboard still reads the legacy snapshot.
+        The next UI slice will move Overview, Explore, and Routes onto bounded read APIs backed by the current canonical estate rather than a full client-side graph.
       </p>
     </section>
   </main>
