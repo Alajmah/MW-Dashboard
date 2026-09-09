@@ -1,4 +1,5 @@
 import "/canonical-ops.js";
+import "/acceptance-ui.js";
 
 const shellCopy = {
   overview: ["Overview", "Canonical operational view of physical placement, logical ownership, evidence quality and unresolved gaps."],
