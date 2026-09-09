@@ -43,7 +43,9 @@ jobs:
           combined = shell + "\n" + js + "\n" + routes + "\n" + css
 
           required = [
-              'import "/acceptance-ui.js"',
+              'import "/acceptance-ui.js?v=',
+              'UI_ASSET_REVISION',
+              'import(`/routes-estate.js?v=${UI_ASSET_REVISION}`)',
               'aria-autocomplete',
               'ArrowDown',
               'ArrowUp',
