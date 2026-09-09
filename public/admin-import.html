@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OSI Import · MW Dashboard</title>
+  <link rel="stylesheet" href="/admin-import.css">
+</head>
+<body>
+  <a class="skip-link" href="#mainContent">Skip to content</a>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">OSI Dashboard · Controlled Import</div>
+      <h1>Middleware Evidence Import</h1>
+    </div>
+    <div class="topbar-actions">
+      <span id="platformState" class="platform-state">Checking platform…</span>
+      <a class="button ghost" href="/">Back to dashboard</a>
+    </div>
+  </header>
+
+  <main id="mainContent" class="page-shell">
+    <section class="intro-card">
+      <div>
+        <p class="eyebrow">Browser-local normalization</p>
+        <h2>Turn a transferred MQ collector archive into a semantic source revision.</h2>
+        <p class="lede">
+          Archive parsing and IBM MQ normalization run locally in this browser. The raw <code>.tar.gz</code>
+          is not uploaded by this release. Only the validated ObservationBundle v2 records are sent to Cloudflare D1 when you publish.
+        </p>
+      </div>
+      <div class="guardrail-list" aria-label="Import guardrails">
+        <span>Read-only source evidence</span>
+        <span>SHA-256 fingerprinted</span>
+        <span>Semantic registry validated</span>
+        <span>Atomic per-source activation</span>
+      </div>
+    </section>
+
+    <div class="layout-grid">
+      <section class="panel" aria-labelledby="selectHeading">
+        <div class="panel-heading">
+          <div>
+            <p class="step-label">01 · Analyze</p>
+            <h2 id="selectHeading">Select collector archive</h2>
+          </div>
+          <span class="badge">MQ v3.1</span>
+        </div>
+
+        <label class="field-label" for="archiveFile">IBM MQ collector archive</label>
+        <div class="file-picker">
+          <input id="archiveFile" type="file" accept=".gz,application/gzip">
+          <div>
+            <strong>Choose mq-topology-*.tar.gz</strong>
+            <span id="selectedFile">No archive selected</span>
+          </div>
+        </div>
+
+        <label class="field-label" for="environmentInput">Environment</label>
+        <input id="environmentInput" class="text-input" type="text" value="prod" maxlength="100" spellcheck="false">
+
+        <button id="analyzeButton" class="button primary" type="button">Analyze locally</button>
+        <p class="field-note">The first analysis loads the pinned Pyodide runtime from jsDelivr, then executes the repository's IBM MQ normalizer in a Web Worker.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="publishHeading">
+        <div class="panel-heading">
+          <div>
+            <p class="step-label">02 · Publish</p>
+            <h2 id="publishHeading">Activate source revision</h2>
+          </div>
+          <span class="badge quiet">D1</span>
+        </div>
+
+        <label class="field-label" for="adminToken">ADMIN_IMPORT_TOKEN</label>
+        <input id="adminToken" class="text-input" type="password" autocomplete="off" placeholder="Required only when publishing">
+        <p class="field-note">The token is not stored in localStorage or sent anywhere except authenticated import API calls.</p>
+
+        <button id="publishButton" class="button primary" type="button" disabled>Publish validated revision</button>
+        <div id="publishResult" class="publish-result" hidden></div>
+      </section>
+    </div>
+
+    <section id="statusPanel" class="status-panel" data-tone="neutral" aria-live="polite">
+      <div class="status-dot" aria-hidden="true"></div>
+      <div>
+        <strong id="statusTitle">Ready for archive selection</strong>
+        <p id="statusDetail">Nothing has been uploaded.</p>
+      </div>
+    </section>
+
+    <section id="resultPanel" class="panel result-panel" hidden aria-labelledby="resultHeading">
+      <div class="panel-heading">
+        <div>
+          <p class="step-label">Analysis result</p>
+          <h2 id="resultHeading">Semantic source bundle</h2>
+        </div>
+        <span class="badge success">Local validation</span>
+      </div>
+
+      <div class="identity-grid">
+        <div><span>Source</span><strong id="sourceValue">—</strong></div>
+        <div><span>Run ID</span><strong id="runValue">—</strong></div>
+        <div><span>Normalizer</span><strong id="normalizerValue">—</strong></div>
+        <div><span>Archive SHA-256</span><strong id="archiveHashValue">—</strong></div>
+        <div><span>Bundle SHA-256</span><strong id="bundleHashValue">—</strong></div>
+      </div>
+
+      <div class="metrics-grid" aria-label="Semantic bundle counts">
+        <div class="metric"><span>Coverage</span><strong id="coverageCount">0</strong></div>
+        <div class="metric"><span>Entities</span><strong id="entityCount">0</strong></div>
+        <div class="metric"><span>Relations</span><strong id="relationCount">0</strong></div>
+        <div class="metric"><span>Unresolved</span><strong id="unresolvedCount">0</strong></div>
+        <div class="metric"><span>Failed coverage</span><strong id="failedCoverageCount">0</strong></div>
+        <div class="metric"><span>Queue managers</span><strong id="qmCount">0</strong></div>
+        <div class="metric"><span>Channels</span><strong id="channelCount">0</strong></div>
+        <div class="metric"><span>Physical hosts</span><strong id="hostCount">0</strong></div>
+        <div class="metric"><span>Activity claims</span><strong id="activityCount">0</strong></div>
+      </div>
+
+      <div class="quality-block">
+        <h3>Quality gate</h3>
+        <ul id="qualityIssues" class="quality-list"></ul>
+      </div>
+    </section>
+
+    <section class="boundary-panel">
+      <h2>Current phase boundary</h2>
+      <p>
+        Activating a source revision does <strong>not</strong> replace the existing legacy dashboard snapshot.
+        Multiple MQ hosts can therefore be imported independently. The next vNext slice will reconcile the current source revisions into one canonical estate projection before the UI switches data planes.
+      </p>
+    </section>
+  </main>
+
+  <script src="/admin-import.js" defer></script>
+</body>
+</html>
