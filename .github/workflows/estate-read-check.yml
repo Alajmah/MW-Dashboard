@@ -1,0 +1,121 @@
+name: Canonical estate read check
+
+on:
+  pull_request:
+    paths:
+      - "src/bootstrap.ts"
+      - "src/semantic-estate-read.ts"
+      - "migrations/**"
+      - "scripts/seed-estate-read-ci.sql"
+      - ".github/workflows/estate-read-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/bootstrap.ts"
+      - "src/semantic-estate-read.ts"
+      - "migrations/**"
+      - "scripts/seed-estate-read-ci.sql"
+      - ".github/workflows/estate-read-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check Worker
+        run: npm run check
+
+      - name: Apply local D1 migrations
+        run: npm run db:migrate:local
+
+      - name: Seed canonical read fixture
+        run: npx wrangler d1 execute DB --local --file scripts/seed-estate-read-ci.sql
+
+      - name: Start local Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler dev --local --port 8787 --var ADMIN_IMPORT_TOKEN:ci-token > /tmp/wrangler-estate-read.log 2>&1 &
+          echo $! > /tmp/wrangler-estate-read.pid
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8787/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/wrangler-estate-read.log
+          exit 1
+
+      - name: Exercise canonical read API
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='http://127.0.0.1:8787/api/v2/estate/current'
+
+          summary="$(curl --fail --silent "$base/summary")"
+          printf '%s\n' "$summary" | grep -Fq '"entities": 2'
+          printf '%s\n' "$summary" | grep -Fq '"relations": 1'
+          printf '%s\n' "$summary" | grep -Fq '"unresolved": 1'
+          printf '%s\n' "$summary" | grep -Fq '"mq.queue_manager": 1'
+          printf '%s\n' "$summary" | grep -Fq '"dynamic": 1'
+
+          first="$(curl --fail --silent "$base/entities?limit=1&offset=0")"
+          printf '%s\n' "$first" | grep -Fq '"total": 2'
+          printf '%s\n' "$first" | grep -Fq '"next_offset": 1'
+
+          qm="$(curl --fail --silent "$base/entities?semantic_type=mq.queue_manager&q=QM1")"
+          printf '%s\n' "$qm" | grep -Fq '"total": 1'
+          printf '%s\n' "$qm" | grep -Fq '"entity_id": "ce-qm"'
+
+          detail="$(curl --fail --silent "$base/entities/ce-qm")"
+          printf '%s\n' "$detail" | grep -Fq '"display_name": "QM1"'
+          printf '%s\n' "$detail" | grep -Fq '"relation_id": "cr-contains"'
+
+          rel="$(curl --fail --silent "$base/relations?source_entity_id=ce-qm")"
+          printf '%s\n' "$rel" | grep -Fq '"total": 1'
+          printf '%s\n' "$rel" | grep -Fq '"target_entity_id": "ce-q"'
+
+          unresolved="$(curl --fail --silent "$base/unresolved?state=dynamic")"
+          printf '%s\n' "$unresolved" | grep -Fq '"total": 1'
+          printf '%s\n' "$unresolved" | grep -Fq '"vendor_value": "Q.REMOTE"'
+
+      - name: Refuse stale canonical reads
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/add-source.sql <<'SQL'
+          INSERT INTO semantic_source_revision (
+            revision_id, run_id, source_kind, source_id, source_display_name, environment,
+            collector, collector_version, normalizer_version, completed_at, imported_at, activated_at,
+            archive_filename, archive_sha256, archive_size_bytes, bundle_sha256,
+            expected_coverage_count, expected_entity_count, expected_relation_count, expected_unresolved_count,
+            status, is_current, quality_json
+          ) VALUES (
+            'src-read-b', 'ci:estate-read:b1', 'ibm_mq_host', 'host-b', 'Host B', 'ci',
+            'synthetic', '1', '3.1.0', '2026-09-09T01:00:00Z', '2026-09-09T01:01:00Z', '2026-09-09T01:02:00Z',
+            'ci-b.tar.gz', 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 100,
+            'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+            0, 0, 0, 0, 'ACTIVE', 1, '{"valid":true}'
+          );
+          SQL
+          npx wrangler d1 execute DB --local --file /tmp/add-source.sql >/dev/null
+          code="$(curl --silent --output /tmp/stale-read.json --write-out '%{http_code}' \
+            http://127.0.0.1:8787/api/v2/estate/current/summary)"
+          test "$code" = "409"
+          grep -Fq 'ESTATE_STALE' /tmp/stale-read.json
+
+      - name: Stop local Worker
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f /tmp/wrangler-estate-read.pid ]]; then kill "$(cat /tmp/wrangler-estate-read.pid)" || true; fi
+          tail -100 /tmp/wrangler-estate-read.log || true
