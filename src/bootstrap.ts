@@ -65,11 +65,11 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const path = new URL(request.url).pathname;
 
-    // The legacy v1 importer existed before the semantic import pipeline and was
-    // writable without authentication. Once ADMIN_IMPORT_TOKEN is introduced,
-    // both old and new import write paths share the same administrative boundary.
+    // This release is additive. Until ADMIN_IMPORT_TOKEN is configured the
+    // pre-existing v1 importer keeps today's behavior; once configured, both
+    // old and new write paths share the same administrative credential.
     if (request.method === "POST" && path === "/api/v1/topology/import") {
-      const denial = await importAuthorizationDenial(request, env.ADMIN_IMPORT_TOKEN);
+      const denial = await importAuthorizationDenial(request, env.ADMIN_IMPORT_TOKEN, true);
       if (denial) return denial;
     }
 
