@@ -1,0 +1,66 @@
+/* Screenshot-driven acceptance refinements. */
+
+/* Overview: remove avoidable stretch and use wide-screen space more deliberately. */
+#view-overview .section-block.two-col{align-items:start;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr)}
+#view-overview .section-block.two-col>.panel{height:auto;align-self:start}
+#overviewHosts.single-host-overview{grid-template-columns:minmax(560px,860px)}
+#overviewHosts.single-host-overview>.summary-card{width:100%}
+#view-overview .section-block{margin-top:18px}
+#view-overview .qmgr-ledger-row{min-height:39px;padding-top:7px;padding-bottom:7px}
+#view-overview .qmgr-ledger-summary{padding-top:8px;padding-bottom:8px}
+#view-overview .gap-list,#view-overview .evidence-summary{padding-top:11px;padding-bottom:11px}
+
+/* Servers: keep the one-host page purposeful without pretending endpoints are hosts. */
+#view-servers .toolbar{margin-bottom:9px}
+#view-servers .canonical-server-view{grid-template-columns:minmax(0,2fr) minmax(330px,.72fr)}
+#view-servers .physical-server-card{min-height:0}
+#view-servers .server-boundary-card{background:#080d12}
+#view-servers .server-boundary-card h3{letter-spacing:-.01em}
+#view-servers .boundary-counts{grid-template-columns:1fr 1fr;gap:0}
+#view-servers .boundary-counts span{padding:7px 10px;border-right:1px solid #17242e}
+#view-servers .boundary-counts span:last-child{border-right:0}
+
+/* Routes autocomplete: structured terminal combobox instead of a bright mouse-only row. */
+.route-suggestions{top:72px!important;padding:4px!important;border-radius:6px!important;background:#070d12!important;border-color:#29404f!important;box-shadow:0 18px 44px rgba(0,0,0,.48)!important;max-height:292px!important}
+.route-suggestions.open{display:block}
+.route-suggestion{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;text-align:left;background:transparent;color:var(--text);border:1px solid transparent;border-radius:4px;padding:8px 9px;margin:0;box-shadow:none;transform:none!important}
+.route-suggestion+.route-suggestion{margin-top:2px}
+.route-suggestion:hover,.route-suggestion:focus,.route-suggestion.keyboard-active{background:#0c1922;border-color:#244b5e;outline:none}
+.route-suggestion.keyboard-active{box-shadow:inset 2px 0 var(--accent)}
+.route-suggestion-main{display:block;min-width:0}
+.route-suggestion-main strong{display:block;font-family:var(--mono);font-size:10.5px;line-height:1.35;color:#edf6fb;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.route-suggestion-main small{display:block;margin-top:3px;color:#8ea0ad;font-size:9.5px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.route-suggestion-tag{align-self:center;border:1px solid #35404c;border-radius:3px;background:#10151b;color:#a6b2bc;padding:2px 5px;font-size:8px;text-transform:uppercase;letter-spacing:.06em}
+.route-suggestion-empty{padding:10px 9px;color:#7f919f;font-size:10px}
+.route-suggestions.open::after{content:"↑/↓ navigate · Enter select · Esc close";position:sticky;bottom:-4px;display:block;margin:4px -4px -4px;padding:6px 9px;border-top:1px solid #1b2b36;background:#070d12;color:#627684;font-size:8.5px;letter-spacing:.02em}
+.route-picker input[aria-expanded="true"]{border-color:#4e8aa8!important;box-shadow:0 0 0 2px rgba(92,200,255,.08)!important}
+.route-picker-context{padding-top:4px!important;font-size:9.5px!important;line-height:1.35!important;min-height:19px!important}
+.route-help{padding-top:2px!important}
+.route-help-copy{max-width:760px!important}
+
+/* Keep empty/no-path route states concise on large displays. */
+.route-empty{min-height:86px;display:grid;place-items:center;padding:18px!important;text-align:center}
+.route-diagnostic{padding:17px 18px!important}
+.route-diagnostic-intro{margin-bottom:13px!important;max-width:820px!important}
+.route-diagnostic-grid{gap:6px!important}
+.diagnostic-card{padding:9px 10px!important}
+
+@media(min-width:1700px){
+  #view-overview .section-block.two-col{grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr)}
+  #overviewHosts.single-host-overview{grid-template-columns:minmax(620px,980px)}
+  #view-servers .canonical-server-view{grid-template-columns:minmax(0,2.2fr) minmax(350px,.7fr)}
+}
+
+@media(max-width:1200px){
+  #view-overview .section-block.two-col{grid-template-columns:1fr}
+  #overviewHosts.single-host-overview{grid-template-columns:1fr}
+  #view-servers .canonical-server-view{grid-template-columns:1fr}
+  #view-servers .boundary-counts{grid-template-columns:1fr}
+  #view-servers .boundary-counts span{border-right:0;border-bottom:1px solid #17242e}
+  #view-servers .boundary-counts span:last-child{border-bottom:0}
+}
+
+@media(max-width:760px){
+  .route-suggestions{top:70px!important;max-height:250px!important}
+  .route-suggestion-main strong,.route-suggestion-main small{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+}
