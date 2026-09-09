@@ -48,11 +48,29 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
 
+      # ADMIN_IMPORT_TOKEN is optional during rollout. When the repository secret
+      # is present, synchronize it into the Worker. When absent, semantic publish
+      # remains disabled while browser-local analysis continues to work.
+      - name: Sync optional semantic import secret
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ADMIN_IMPORT_TOKEN: ${{ secrets.ADMIN_IMPORT_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${ADMIN_IMPORT_TOKEN:-}" ]]; then
+            printf '%s' "$ADMIN_IMPORT_TOKEN" | npx wrangler secret put ADMIN_IMPORT_TOKEN
+            echo "ADMIN_IMPORT_TOKEN synchronized to Cloudflare Worker."
+          else
+            echo "ADMIN_IMPORT_TOKEN is not configured; semantic publishing remains disabled."
+          fi
+
       - name: Smoke test deployed health endpoint
         shell: bash
         run: |
           set -euo pipefail
-          response="$(curl --fail --silent --show-error --retry 5 --retry-delay 2 https://mw-dashboard.saeedm309.workers.dev/health)"
+          response="$(curl --fail --silent --show-error --retry 8 --retry-all-errors --retry-delay 2 https://mw-dashboard.saeedm309.workers.dev/health)"
           printf '%s\n' "$response"
           printf '%s\n' "$response" | grep -Fq '"status": "ok"'
 
@@ -60,6 +78,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          response="$(curl --fail --silent --show-error --retry 5 --retry-delay 2 https://mw-dashboard.saeedm309.workers.dev/api/v2/import/status)"
+          response="$(curl --fail --silent --show-error --retry 8 --retry-all-errors --retry-delay 2 https://mw-dashboard.saeedm309.workers.dev/api/v2/import/status)"
           printf '%s\n' "$response"
           printf '%s\n' "$response" | grep -Fq '"database_ready": true'
