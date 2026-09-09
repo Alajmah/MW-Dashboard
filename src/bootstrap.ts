@@ -2,6 +2,7 @@ import app from "./index";
 import { handleCurrentObservations } from "./current-observations";
 import { importAuthorizationDenial } from "./import-auth";
 import { handleSemanticEstate } from "./semantic-estate";
+import { handleSemanticEstateRead } from "./semantic-estate-read";
 import { handleSemanticImport } from "./semantic-import";
 
 interface Env {
@@ -86,6 +87,9 @@ export default {
       ADMIN_IMPORT_TOKEN: env.ADMIN_IMPORT_TOKEN,
     });
     if (currentObservations) return currentObservations;
+
+    const semanticEstateRead = await handleSemanticEstateRead(request, { DB: env.DB });
+    if (semanticEstateRead) return semanticEstateRead;
 
     const semanticEstate = await handleSemanticEstate(request, {
       DB: env.DB,
