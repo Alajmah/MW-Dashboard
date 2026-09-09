@@ -1,7 +1,9 @@
+import "/canonical-ops.js";
+
 const shellCopy = {
   overview: ["Overview", "Canonical operational view of physical placement, logical ownership, evidence quality and unresolved gaps."],
   inventory: ["Explore", "Search the canonical semantic estate with server-side pagination and explicit ownership, placement and evidence context."],
-  servers: ["Servers", "Legacy snapshot view retained while server-specific canonical projections are migrated."],
+  servers: ["Servers", "Physical middleware hosts and confirmed queue-manager placement. Client IPs remain application/network evidence, not physical servers."],
   middleware: ["Middleware", "Legacy snapshot view retained while middleware-specific canonical projections are migrated."],
   applications: ["Applications", "Legacy snapshot view retained while application-specific canonical projections are migrated."],
   routes: ["Routes", "Trace canonical delivery semantics, runtime queue access and MQ transport while keeping access evidence distinct from actual PUT/GET activity."],
@@ -20,6 +22,7 @@ function shellSetView(view) {
   const subtitle = document.getElementById("pageSubtitle");
   if (title) title.textContent = copy[0];
   if (subtitle) subtitle.textContent = copy[1];
+  window.osiApplyCanonicalShell?.();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -44,7 +47,7 @@ async function ensureCanonicalRoutes() {
 }
 
 function legacyView(view) {
-  return ["servers", "middleware", "applications", "snapshots", "administration"].includes(view);
+  return ["middleware", "applications", "snapshots", "administration"].includes(view);
 }
 
 async function navigate(view) {
@@ -54,13 +57,21 @@ async function navigate(view) {
       await ensureCanonicalRoutes();
       return;
     }
-    if (legacyView(view)) await ensureLegacy();
+    if (view === "servers") {
+      await window.osiRenderCanonicalServers?.();
+      return;
+    }
+    if (legacyView(view)) {
+      await ensureLegacy();
+      window.osiApplyCanonicalShell?.();
+    }
   } catch (error) {
     const message = document.getElementById("globalMessage");
     if (message) {
       message.hidden = false;
       message.className = "global-message error";
-      message.textContent = `${view === "routes" ? "Canonical route" : "Legacy view"} failed to load: ${error instanceof Error ? error.message : String(error)}`;
+      const source = view === "routes" ? "Canonical route" : view === "servers" ? "Canonical server" : "Legacy view";
+      message.textContent = `${source} failed to load: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 }
@@ -74,11 +85,15 @@ document.querySelectorAll("[data-go]").forEach((button) => {
 document.getElementById("jumpInventory")?.addEventListener("click", () => navigate("inventory"));
 
 // This document-level listener runs after any later direct listeners installed by
-// the legacy module, so canonical view copy remains authoritative when returning
-// to Overview, Explore, or Routes after a legacy view has been opened.
+// the legacy module, so canonical screens remain authoritative even after a legacy
+// module has been loaded during the same browser session.
 document.addEventListener("click", (event) => {
   const view = event.target.closest("[data-view]")?.dataset.view || event.target.closest("[data-go]")?.dataset.go;
-  if (view === "overview" || view === "inventory" || view === "routes") shellSetView(view);
+  if (["overview", "inventory", "routes", "servers"].includes(view)) {
+    shellSetView(view);
+    if (view === "servers") setTimeout(() => window.osiRenderCanonicalServers?.(), 0);
+    if (view === "overview") setTimeout(() => window.osiRenderQmgrLedger?.(), 0);
+  }
 });
 
 shellSetView("overview");
