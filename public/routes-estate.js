@@ -96,18 +96,58 @@ function setSelection(side, entity, { quiet = false, preserveResult = false } = 
   if (!preserveResult) invalidateRouteResult();
 }
 
-function searchResultHtml(entity) {
+function normalizeRouteSearch(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function routeSearchMatch(entity, query) {
+  const display = normalizeRouteSearch(entity?.display_name || "");
+  const identity = normalizeRouteSearch(entity?.identity_key || "");
+  if (!display && !identity) return null;
+  if (display === query) return { rank: 0, field: "name", kind: "exact" };
+  if (display.startsWith(query)) return { rank: 1, field: "name", kind: "prefix" };
+  const segments = display.split(/[.\s/_\\:|-]+/).filter(Boolean);
+  if (segments.some((segment) => segment.startsWith(query))) return { rank: 2, field: "name", kind: "segment" };
+  if (display.includes(query)) return { rank: 3, field: "name", kind: "contains" };
+  if (query.length < 4) return null;
+  if (identity === query) return { rank: 4, field: "identity", kind: "exact" };
+  if (identity.startsWith(query)) return { rank: 5, field: "identity", kind: "prefix" };
+  if (identity.includes(query)) return { rank: 6, field: "identity", kind: "contains" };
+  return null;
+}
+
+function rankRouteSearchResults(rawResults, query, showSystem) {
+  return (rawResults || [])
+    .filter((entity) => showSystem || entity.properties?.system !== true)
+    .map((entity) => ({ entity, match: routeSearchMatch(entity, query) }))
+    .filter((item) => item.match)
+    .sort((left, right) => {
+      if (left.match.rank !== right.match.rank) return left.match.rank - right.match.rank;
+      const leftName = normalizeRouteSearch(left.entity.display_name || left.entity.identity_key);
+      const rightName = normalizeRouteSearch(right.entity.display_name || right.entity.identity_key);
+      return leftName.localeCompare(rightName) || String(left.entity.entity_id).localeCompare(String(right.entity.entity_id));
+    })
+    .slice(0, 20);
+}
+
+function searchResultHtml(item) {
+  const { entity, match } = item;
   const props = entity.properties || {};
   const system = props.system === true || String(entity.display_name || "").startsWith("SYSTEM.");
+  const tags = [];
+  if (match.field === "identity") tags.push('<span class="route-suggestion-tag">identity</span>');
+  if (system) tags.push('<span class="route-suggestion-tag">system</span>');
+  const matchNote = match.field === "identity" ? " · matched canonical identity" : "";
   return `<button type="button" class="route-suggestion" data-route-entity="${resc(entity.entity_id)}">
-    <span class="route-suggestion-main"><strong>${resc(entity.display_name || entity.identity_key)}</strong><small>${resc(entityQualifier(entity))}</small></span>
-    ${system ? '<span class="route-suggestion-tag">system</span>' : ""}
+    <span class="route-suggestion-main"><strong>${resc(entity.display_name || entity.identity_key)}</strong><small>${resc(entityQualifier(entity))}${resc(matchNote)}</small></span>
+    ${tags.join("")}
   </button>`;
 }
 
 async function searchEntities(side, query) {
   const { input, results } = pickerNodes(side);
   const normalized = query.trim();
+  const normalizedQuery = normalizeRouteSearch(normalized);
   clearSearch(side);
   const search = routeState.searches[side];
   const sequence = search.sequence;
@@ -127,16 +167,21 @@ async function searchEntities(side, query) {
   results.classList.add("open");
 
   try {
-    const data = await routeApi(`/api/v2/routes/search?q=${encodeURIComponent(normalized)}&limit=20`, { signal: controller.signal });
+    const data = await routeApi(`/api/v2/routes/search?q=${encodeURIComponent(normalized)}&limit=50`, { signal: controller.signal });
     if (sequence !== search.sequence || input.value.trim() !== normalized || routeState[side]) return;
-    const showSystem = normalized.toLowerCase().includes("system.");
-    const entities = (data.results || []).filter((entity) => showSystem || entity.properties?.system !== true);
-    results.innerHTML = entities.length ? entities.map(searchResultHtml).join("") : `<div class="route-suggestion-empty">No canonical route endpoints match this search.</div>`;
+    const showSystem = normalizedQuery.includes("system.");
+    const ranked = rankRouteSearchResults(data.results, normalizedQuery, showSystem);
+    if (ranked.length) {
+      results.innerHTML = ranked.map(searchResultHtml).join("");
+    } else {
+      const identityHint = normalizedQuery.length < 4 ? " Use 4+ characters to search canonical identity keys." : "";
+      results.innerHTML = `<div class="route-suggestion-empty">No visible route endpoint names match this search.${identityHint}</div>`;
+    }
     results.querySelectorAll("[data-route-entity]").forEach((button) => {
       button.addEventListener("click", () => {
-        const entity = entities.find((item) => item.entity_id === button.dataset.routeEntity);
-        if (!entity) return;
-        setSelection(side, entity);
+        const item = ranked.find((entry) => entry.entity.entity_id === button.dataset.routeEntity);
+        if (!item) return;
+        setSelection(side, item.entity);
       });
     });
   } catch (error) {
