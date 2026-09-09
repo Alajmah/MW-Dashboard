@@ -102,7 +102,7 @@ async function analyze() {
   byId("resultPanel").hidden = true;
   setBusy(true);
   status("Reading collector archive", "The archive stays in this browser during normalization.");
-  const worker = new Worker("/import-worker.js");
+  const worker = new Worker("/import-worker.js", { type: "module" });
   try {
     const archive = await file.arrayBuffer();
     const result = await new Promise((resolve, reject) => {
