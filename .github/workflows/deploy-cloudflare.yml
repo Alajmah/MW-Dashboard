@@ -66,6 +66,22 @@ jobs:
             echo "ADMIN_IMPORT_TOKEN is not configured; semantic publishing remains disabled."
           fi
 
+      # Prove that the exact GitHub secret value resolves through the deployed
+      # Worker auth boundary. This catches secret propagation/configuration errors
+      # without printing or otherwise exposing the token.
+      - name: Smoke test semantic import authorization
+        if: ${{ secrets.ADMIN_IMPORT_TOKEN != '' }}
+        shell: bash
+        env:
+          ADMIN_IMPORT_TOKEN: ${{ secrets.ADMIN_IMPORT_TOKEN }}
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 8 --retry-all-errors --retry-delay 2 \
+            -H "Authorization: Bearer ${ADMIN_IMPORT_TOKEN}" \
+            https://mw-dashboard.saeedm309.workers.dev/api/v2/import/sources)"
+          printf '%s\n' "$response"
+          printf '%s\n' "$response" | grep -Fq '"sources"'
+
       - name: Smoke test deployed health endpoint
         shell: bash
         run: |
