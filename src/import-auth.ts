@@ -18,13 +18,20 @@ async function equalToken(left: string, right: string): Promise<boolean> {
 
 /**
  * Return a denial response when an import request is not authorized, otherwise null.
- * This is intentionally shared with the legacy write boundary so enabling the v2
- * admin token cannot leave the old topology importer writable without credentials.
+ * `allowWhenUnconfigured` is used only for the pre-existing v1 endpoint during the
+ * token rollout so this additive release does not break today's manual import path.
+ * As soon as ADMIN_IMPORT_TOKEN is configured, the legacy endpoint is protected too.
  */
-export async function importAuthorizationDenial(request: Request, configuredToken?: string): Promise<Response | null> {
+export async function importAuthorizationDenial(
+  request: Request,
+  configuredToken?: string,
+  allowWhenUnconfigured = false,
+): Promise<Response | null> {
   const expected = configuredToken?.trim();
   if (!expected) {
-    return reply({ detail: "Topology import is disabled until ADMIN_IMPORT_TOKEN is configured" }, 503);
+    return allowWhenUnconfigured
+      ? null
+      : reply({ detail: "Topology import is disabled until ADMIN_IMPORT_TOKEN is configured" }, 503);
   }
 
   const authorization = request.headers.get("authorization") ?? "";
