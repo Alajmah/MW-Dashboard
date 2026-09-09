@@ -57,7 +57,7 @@ jobs:
           html_ids = set(parser.ids)
           dynamic_ids = set(re.findall(r'(?:\bid|\.id)\s*=\s*["\']([A-Za-z0-9_-]+)["\']', js))
           dynamic_ids |= set(re.findall(r'id=\\?["\']([A-Za-z0-9_-]+)\\?["\']', js))
-          referenced = set(re.findall(r'(?:\$|rq|iq|s\$)\("([A-Za-z0-9_-]+)"\)', js))
+          referenced = set(re.findall(r'(?:\$|rq|iq|s\$|eq)\("([A-Za-z0-9_-]+)"\)', js))
           missing = sorted(referenced - html_ids - dynamic_ids)
           if missing:
               raise SystemExit(f"JavaScript references missing HTML/dynamic ids: {missing}")
@@ -95,31 +95,50 @@ jobs:
 
           print(f"Readability contract OK: {len(sizes)} explicit font-size rules; minimum {min(sizes):g}px")
 
-      - name: Inventory v2 contract
+      - name: Canonical Overview and Explore contract
         shell: python
         run: |
           from pathlib import Path
 
           html = Path("public/index.html").read_text()
-          js = Path("public/inventory-v2.js").read_text()
-          css = Path("public/inventory-v2.css").read_text()
+          shell = Path("public/shell.js").read_text()
+          estate = Path("public/estate-ui.js").read_text()
+          css = Path("public/estate-ui.css").read_text()
           required = [
-              'href="/inventory-v2.css"',
-              'src="/inventory-v2.js"',
-              'function columnsFor(',
-              'function semanticRelation(',
-              'inventoryStatus',
-              'Raw metadata',
-              'inv-context',
-              'inv-status',
+              'href="/estate-ui.css"',
+              'src="/shell.js"',
+              'src="/estate-ui.js"',
+              'data-view="inventory">Explore<',
+              '/api/v2/estate/current/summary',
+              '/api/v2/estate/current/entities',
+              'semantic_type',
+              'identity_state',
+              'next_offset',
+              'Current / observed server',
+              'Canonical semantic estate',
+              'import("/app.js")',
+              'import("/routes-v2.js")',
           ]
-          combined = html + "\n" + js + "\n" + css
+          combined = html + "\n" + shell + "\n" + estate + "\n" + css
           missing = [item for item in required if item not in combined]
           if missing:
-              raise SystemExit(f"Inventory v2 contract missing: {missing}")
-          print("Inventory v2 contract OK")
+              raise SystemExit(f"canonical estate UI contract missing: {missing}")
 
-      - name: Semantic UX contract
+          # Overview and Explore must not eagerly execute legacy graph modules.
+          forbidden_html = [
+              'src="/app.js"',
+              'src="/routes-v2.js"',
+              'src="/inventory-v2.js"',
+              'src="/inventory-v2-bridge.js"',
+          ]
+          present = [item for item in forbidden_html if item in html]
+          if present:
+              raise SystemExit(f"legacy full-graph modules are still eagerly loaded: {present}")
+          if '/api/v1/topology/current' in shell or '/api/v1/topology/current' in estate:
+              raise SystemExit("initial canonical shell must not fetch the legacy full graph")
+          print("Canonical Overview/Explore contract OK")
+
+      - name: Semantic UX assets remain valid
         shell: python
         run: |
           from pathlib import Path
@@ -149,4 +168,4 @@ jobs:
               raise SystemExit("semantic UX reintroduced the 700-object inventory cap")
           if 'function installObserver' in text:
               raise SystemExit("semantic UX must not use a broad global mutation observer")
-          print(f"Semantic UX contract OK across {len(semantic_files)} JS modules")
+          print(f"Semantic UX asset contract OK across {len(semantic_files)} JS modules")
