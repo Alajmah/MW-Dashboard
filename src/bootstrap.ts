@@ -1,4 +1,5 @@
 import app from "./index";
+import { importAuthorizationDenial } from "./import-auth";
 import { handleSemanticImport } from "./semantic-import";
 
 interface Env {
@@ -62,6 +63,16 @@ function d1EvidenceBucket(db: D1Database): R2Bucket {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const path = new URL(request.url).pathname;
+
+    // The legacy v1 importer existed before the semantic import pipeline and was
+    // writable without authentication. Once ADMIN_IMPORT_TOKEN is introduced,
+    // both old and new import write paths share the same administrative boundary.
+    if (request.method === "POST" && path === "/api/v1/topology/import") {
+      const denial = await importAuthorizationDenial(request, env.ADMIN_IMPORT_TOKEN);
+      if (denial) return denial;
+    }
+
     const semanticImport = await handleSemanticImport(request, {
       DB: env.DB,
       ADMIN_IMPORT_TOKEN: env.ADMIN_IMPORT_TOKEN,
