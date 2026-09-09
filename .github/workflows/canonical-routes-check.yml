@@ -1,0 +1,107 @@
+name: Canonical routes check
+
+on:
+  pull_request:
+    paths:
+      - "src/bootstrap.ts"
+      - "src/semantic-routes.ts"
+      - "public/routes-estate.js"
+      - "public/shell.js"
+      - "scripts/seed-canonical-routes-ci.sql"
+      - "migrations/**"
+      - ".github/workflows/canonical-routes-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/bootstrap.ts"
+      - "src/semantic-routes.ts"
+      - "public/routes-estate.js"
+      - "public/shell.js"
+      - "scripts/seed-canonical-routes-ci.sql"
+      - "migrations/**"
+      - ".github/workflows/canonical-routes-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check Worker
+        run: npm run check
+
+      - name: JavaScript syntax
+        run: |
+          node --check public/routes-estate.js
+          node --check public/shell.js
+
+      - name: Apply local D1 migrations
+        run: npm run db:migrate:local
+
+      - name: Seed canonical route fixture
+        run: npx wrangler d1 execute DB --local --file=scripts/seed-canonical-routes-ci.sql
+
+      - name: Start local Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler dev --local --port 8787 --var ADMIN_IMPORT_TOKEN:ci-token > /tmp/wrangler-routes.log 2>&1 &
+          echo $! > /tmp/wrangler-routes.pid
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8787/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/wrangler-routes.log
+          exit 1
+
+      - name: Exercise canonical route search and trace
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='http://127.0.0.1:8787/api/v2/routes'
+
+          search="$(curl --fail --silent "$base/search?q=PRODUCER")"
+          printf '%s\n' "$search" | grep -Fq '"display_name": "PRODUCER"'
+          printf '%s\n' "$search" | grep -Fq '"semantic_type": "app.application_instance"'
+
+          trace="$(curl --fail --silent "$base/trace?from=app-producer&to=app-consumer&max_depth=12")"
+          printf '%s\n' "$trace" > /tmp/trace.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/trace.json'))
+          assert data['found'] is True
+          assert data['mode'] == 'runtime_access'
+          assert data['semantics']['runtime_access_is_activity'] is False
+          assert len(data['steps']) == 3
+          assert [x['semantic_type'] for x in data['steps']] == [
+              'runtime.opens_for_output', 'routing.resolves_to', 'runtime.opens_for_input'
+          ]
+          assert data['steps'][2]['reversed'] is True
+          assert any(x.get('xmitq',{}).get('display_name') == 'QM2.XMIT' for x in data['transport'])
+          assert any(x.get('channel',{}).get('display_name') == 'TO.QM2' for x in data['transport'])
+          assert any(x.get('peer_queue_manager',{}).get('display_name') == 'QM2' for x in data['transport'])
+          assert any(x['state'] == 'dynamic' for x in data['unresolved'])
+          assert any(x.get('semantic_warning') for x in data['steps'])
+          print('Canonical route semantics OK')
+          PY
+
+          missing="$(curl --fail --silent "$base/trace?from=q-xmit&to=app-consumer")"
+          printf '%s\n' "$missing" | grep -Fq '"found": false'
+          printf '%s\n' "$missing" | grep -Fq 'does not prove the systems are disconnected'
+
+      - name: Stop local Worker
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f /tmp/wrangler-routes.pid ]]; then kill "$(cat /tmp/wrangler-routes.pid)" || true; fi
+          tail -120 /tmp/wrangler-routes.log || true
