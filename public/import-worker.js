@@ -1,5 +1,6 @@
 const PYODIDE_VERSION = "314.0.6";
 const PYODIDE_INDEX = `${self.location.origin}/import-runtime/pyodide/`;
+const PYODIDE_MODULE = "/import-runtime/pyodide/pyodide.mjs";
 const RUNTIME_FILES = [
   "normalize_mq_topology.py",
   "_normalize_mq_observations_impl.py",
@@ -35,9 +36,9 @@ async function getPyodide() {
   if (!pyodidePromise) {
     pyodidePromise = (async () => {
       progress("Loading local normalization engine", `Pyodide ${PYODIDE_VERSION}`);
-      importScripts(`${PYODIDE_INDEX}pyodide.js`);
-      if (typeof self.loadPyodide !== "function") throw new Error("Pyodide failed to initialize");
-      const pyodide = await self.loadPyodide({ indexURL: PYODIDE_INDEX });
+      const module = await import(PYODIDE_MODULE);
+      if (typeof module.loadPyodide !== "function") throw new Error("Pyodide module failed to initialize");
+      const pyodide = await module.loadPyodide({ indexURL: PYODIDE_INDEX });
       const runtimeDir = "/home/pyodide/mq-normalizer";
       pyodide.FS.mkdirTree(runtimeDir);
       progress("Loading IBM MQ semantic normalizer", "Normalizer 3.1.0");
