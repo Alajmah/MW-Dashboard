@@ -43,7 +43,7 @@ jobs:
               '"Physical middleware hosts and confirmed queue-manager placement.',
               'window.osiRenderCanonicalServers',
               'window.osiRenderQmgrLedger',
-              'semantic_type=infra.host',
+              'fetchCanonicalType("infra.host")',
               'Client IPs are not physical servers',
               'infra.host',
               'qmgr-ledger',
