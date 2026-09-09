@@ -1,0 +1,66 @@
+name: Canonical operations UI check
+
+on:
+  pull_request:
+    paths:
+      - "public/canonical-ops.js"
+      - "public/canonical-ops.css"
+      - "public/shell.js"
+      - ".github/workflows/canonical-ops-ui-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/canonical-ops.js"
+      - "public/canonical-ops.css"
+      - "public/shell.js"
+      - ".github/workflows/canonical-ops-ui-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: JavaScript syntax
+        run: node --check public/canonical-ops.js && node --check public/shell.js
+
+      - name: Canonical server boundary contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          shell = Path("public/shell.js").read_text()
+          ops = Path("public/canonical-ops.js").read_text()
+          css = Path("public/canonical-ops.css").read_text()
+
+          required = [
+              'import "/canonical-ops.js"',
+              '"Physical middleware hosts and confirmed queue-manager placement.',
+              'window.osiRenderCanonicalServers',
+              'window.osiRenderQmgrLedger',
+              'semantic_type=infra.host',
+              'Client IPs are not physical servers',
+              'infra.host',
+              'qmgr-ledger',
+              'canonical-server-view',
+              '.qmgr-ledger-row',
+              '.server-boundary-card',
+          ]
+          combined = shell + "\n" + ops + "\n" + css
+          missing = [item for item in required if item not in combined]
+          if missing:
+              raise SystemExit(f"canonical operations UI contract missing: {missing}")
+
+          if '/api/v1/topology/current' in ops:
+              raise SystemExit("canonical operational UI must not load the legacy full graph")
+          if 'fetchCanonicalType("infra.network_endpoint")' in ops:
+              raise SystemExit("network endpoints must not be promoted into the physical Servers projection")
+          if 'return ["servers",' in shell or '["servers", "middleware"' in shell:
+              raise SystemExit("Servers must not be lazy-loaded through the legacy snapshot module")
+
+          print("Canonical operations UI contract OK")
