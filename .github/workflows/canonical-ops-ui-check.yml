@@ -39,7 +39,7 @@ jobs:
           css = Path("public/canonical-ops.css").read_text()
 
           required = [
-              'import "/canonical-ops.js"',
+              'import "/canonical-ops.js?v=',
               '"Physical middleware hosts and confirmed queue-manager placement.',
               'window.osiRenderCanonicalServers',
               'window.osiRenderQmgrLedger',
