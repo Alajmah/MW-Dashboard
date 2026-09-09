@@ -38,6 +38,15 @@
 .route-help{padding-top:2px!important}
 .route-help-copy{max-width:760px!important}
 
+/* Route picker overlay owns the stacking context while a field is active. */
+#view-routes .route-workbench{position:relative!important;overflow:visible!important;z-index:2}
+#view-routes .route-workbench:focus-within{z-index:100}
+#view-routes .route-form-v2{position:relative;overflow:visible;z-index:110}
+#view-routes .route-picker{position:relative;overflow:visible;z-index:120}
+#view-routes .route-picker:focus-within{z-index:130}
+#view-routes .route-suggestions.open{z-index:1000!important}
+#view-routes .route-results-v2{position:relative;z-index:1;overflow:visible}
+
 /* Keep empty/no-path route states concise on large displays. */
 .route-empty{min-height:86px;display:grid;place-items:center;padding:18px!important;text-align:center}
 .route-diagnostic{padding:17px 18px!important}

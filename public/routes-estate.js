@@ -2,6 +2,12 @@ const routeState = {
   from: null,
   to: null,
   timers: { from: null, to: null },
+  searches: {
+    from: { controller: null, sequence: 0 },
+    to: { controller: null, sequence: 0 },
+  },
+  traceController: null,
+  traceSequence: 0,
 };
 
 const rq = (id) => document.getElementById(id);
@@ -30,8 +36,8 @@ function entityQualifier(entity) {
   return [typeLabel(entity?.semantic_type), owner, evidence].filter(Boolean).join(" · ");
 }
 
-async function routeApi(path) {
-  const response = await fetch(path, { headers: { accept: "application/json" } });
+async function routeApi(path, { signal } = {}) {
+  const response = await fetch(path, { headers: { accept: "application/json" }, signal });
   let body = {};
   try { body = await response.json(); } catch {}
   if (!response.ok) {
@@ -42,16 +48,52 @@ async function routeApi(path) {
   return body;
 }
 
-function setSelection(side, entity, { quiet = false } = {}) {
+function pickerNodes(side) {
+  return {
+    input: rq(side === "from" ? "routeFrom" : "routeTo"),
+    context: rq(side === "from" ? "routeFromContext" : "routeToContext"),
+    results: rq(side === "from" ? "routeFromResults" : "routeToResults"),
+  };
+}
+
+function clearSearch(side, { clearResults = true } = {}) {
+  const search = routeState.searches[side];
+  search.sequence += 1;
+  search.controller?.abort();
+  search.controller = null;
+  clearTimeout(routeState.timers[side]);
+  routeState.timers[side] = null;
+  const { results } = pickerNodes(side);
+  if (clearResults && results) results.innerHTML = "";
+  results?.classList.remove("open");
+}
+
+function invalidateRouteResult() {
+  routeState.traceSequence += 1;
+  routeState.traceController?.abort();
+  routeState.traceController = null;
+  const title = rq("routeTitle");
+  const meta = rq("routeMeta");
+  const result = rq("routeResult");
+  if (title) title.textContent = "Route selection changed";
+  if (meta) meta.textContent = "Select exact canonical endpoints";
+  if (result) {
+    result.className = "route-empty";
+    result.textContent = "Select exact source and destination entities, then trace delivery.";
+  }
+}
+
+function setSelection(side, entity, { quiet = false, preserveResult = false } = {}) {
   routeState[side] = entity || null;
-  const input = rq(side === "from" ? "routeFrom" : "routeTo");
-  const context = rq(side === "from" ? "routeFromContext" : "routeToContext");
+  clearSearch(side);
+  const { input, context } = pickerNodes(side);
   if (entity) {
     input.value = entity.display_name || entity.identity_key || entity.entity_id;
     context.textContent = entityQualifier(entity);
   } else if (!quiet) {
     context.textContent = side === "from" ? "Choose a source application, process or queue" : "Choose a destination application, process or queue";
   }
+  if (!preserveResult) invalidateRouteResult();
 }
 
 function searchResultHtml(entity) {
@@ -64,17 +106,29 @@ function searchResultHtml(entity) {
 }
 
 async function searchEntities(side, query) {
-  const results = rq(side === "from" ? "routeFromResults" : "routeToResults");
+  const { input, results } = pickerNodes(side);
   const normalized = query.trim();
+  clearSearch(side);
+  const search = routeState.searches[side];
+  const sequence = search.sequence;
+
   if (normalized.length < 2) {
-    results.innerHTML = `<div class="route-suggestion-empty">Type at least 2 characters.</div>`;
-    results.classList.toggle("open", normalized.length > 0);
+    if (normalized.length > 0) {
+      results.innerHTML = `<div class="route-suggestion-empty">Type at least 2 characters.</div>`;
+      results.classList.add("open");
+    }
     return;
   }
+
+  const controller = new AbortController();
+  search.controller = controller;
+  results.dataset.query = normalized;
   results.innerHTML = `<div class="route-suggestion-empty">Searching canonical estate…</div>`;
   results.classList.add("open");
+
   try {
-    const data = await routeApi(`/api/v2/routes/search?q=${encodeURIComponent(normalized)}&limit=20`);
+    const data = await routeApi(`/api/v2/routes/search?q=${encodeURIComponent(normalized)}&limit=20`, { signal: controller.signal });
+    if (sequence !== search.sequence || input.value.trim() !== normalized || routeState[side]) return;
     const showSystem = normalized.toLowerCase().includes("system.");
     const entities = (data.results || []).filter((entity) => showSystem || entity.properties?.system !== true);
     results.innerHTML = entities.length ? entities.map(searchResultHtml).join("") : `<div class="route-suggestion-empty">No canonical route endpoints match this search.</div>`;
@@ -83,26 +137,29 @@ async function searchEntities(side, query) {
         const entity = entities.find((item) => item.entity_id === button.dataset.routeEntity);
         if (!entity) return;
         setSelection(side, entity);
-        results.classList.remove("open");
       });
     });
   } catch (error) {
+    if (error?.name === "AbortError") return;
+    if (sequence !== search.sequence || input.value.trim() !== normalized) return;
     results.innerHTML = `<div class="route-suggestion-empty">${resc(error.message)}</div>`;
+  } finally {
+    if (search.controller === controller) search.controller = null;
   }
 }
 
 function bindPicker(side) {
-  const input = rq(side === "from" ? "routeFrom" : "routeTo");
-  const results = rq(side === "from" ? "routeFromResults" : "routeToResults");
+  const { input, context, results } = pickerNodes(side);
   input.addEventListener("input", () => {
     routeState[side] = null;
-    const context = rq(side === "from" ? "routeFromContext" : "routeToContext");
+    clearSearch(side);
+    invalidateRouteResult();
     context.textContent = "Select an exact canonical entity from the results";
-    clearTimeout(routeState.timers[side]);
     routeState.timers[side] = setTimeout(() => searchEntities(side, input.value), 180);
   });
   input.addEventListener("focus", () => {
-    if (results.innerHTML.trim()) results.classList.add("open");
+    // Focus alone never reopens cached results. A new query must be typed.
+    if (routeState[side]) results.classList.remove("open");
   });
 }
 
@@ -182,27 +239,42 @@ async function runRoute() {
     rq("routeResult").innerHTML = `<div class="route-diagnostic-intro"><h3>Route endpoints are not resolved</h3><p>Select a result from each search list; typed text alone is not treated as an entity identity.</p></div>`;
     return;
   }
+
+  routeState.traceSequence += 1;
+  const sequence = routeState.traceSequence;
+  routeState.traceController?.abort();
+  const controller = new AbortController();
+  routeState.traceController = controller;
+  const fromId = routeState.from.entity_id;
+  const toId = routeState.to.entity_id;
+
   rq("routeTitle").textContent = "Tracing canonical semantics…";
   rq("routeMeta").textContent = "Current estate";
   rq("routeResult").className = "route-empty";
   rq("routeResult").textContent = "Querying the canonical estate for the strongest supported semantic path and MQ transport expansion…";
   try {
-    const data = await routeApi(`/api/v2/routes/trace?from=${encodeURIComponent(routeState.from.entity_id)}&to=${encodeURIComponent(routeState.to.entity_id)}&max_depth=12`);
+    const data = await routeApi(`/api/v2/routes/trace?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}&max_depth=12`, { signal: controller.signal });
+    if (sequence !== routeState.traceSequence || routeState.from?.entity_id !== fromId || routeState.to?.entity_id !== toId) return;
     if (data.found) renderFound(data); else renderNotFound(data);
   } catch (error) {
+    if (error?.name === "AbortError") return;
+    if (sequence !== routeState.traceSequence) return;
     rq("routeTitle").textContent = "Route query unavailable";
     rq("routeMeta").textContent = error.code || "Error";
     rq("routeResult").className = "route-diagnostic";
     rq("routeResult").innerHTML = `<div class="route-diagnostic-intro"><h3>Canonical route query failed</h3><p>${resc(error.message)}</p></div>`;
+  } finally {
+    if (routeState.traceController === controller) routeState.traceController = null;
   }
 }
 
 function swapEndpoints() {
   const oldFrom = routeState.from;
   const oldTo = routeState.to;
-  setSelection("from", oldTo, { quiet: true });
-  setSelection("to", oldFrom, { quiet: true });
+  setSelection("from", oldTo, { quiet: true, preserveResult: true });
+  setSelection("to", oldFrom, { quiet: true, preserveResult: true });
   if (routeState.from && routeState.to) runRoute();
+  else invalidateRouteResult();
 }
 
 function configureRouteCopy() {
@@ -227,8 +299,8 @@ function initCanonicalRoutes() {
   if (!form || form.dataset.canonicalBound === "true") return;
   form.dataset.canonicalBound = "true";
   configureRouteCopy();
-  setSelection("from", null);
-  setSelection("to", null);
+  setSelection("from", null, { preserveResult: true });
+  setSelection("to", null, { preserveResult: true });
   bindPicker("from");
   bindPicker("to");
   form.addEventListener("submit", (event) => { event.preventDefault(); runRoute(); });

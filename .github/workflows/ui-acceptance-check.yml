@@ -5,6 +5,7 @@ on:
     paths:
       - "public/acceptance-ui.js"
       - "public/acceptance-ui.css"
+      - "public/routes-estate.js"
       - "public/shell.js"
       - ".github/workflows/ui-acceptance-check.yml"
   push:
@@ -13,6 +14,7 @@ on:
     paths:
       - "public/acceptance-ui.js"
       - "public/acceptance-ui.css"
+      - "public/routes-estate.js"
       - "public/shell.js"
       - ".github/workflows/ui-acceptance-check.yml"
 
@@ -27,7 +29,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: JavaScript syntax
-        run: node --check public/acceptance-ui.js && node --check public/shell.js
+        run: node --check public/acceptance-ui.js && node --check public/routes-estate.js && node --check public/shell.js
 
       - name: Screenshot acceptance contract
         shell: python
@@ -36,8 +38,9 @@ jobs:
 
           shell = Path("public/shell.js").read_text()
           js = Path("public/acceptance-ui.js").read_text()
+          routes = Path("public/routes-estate.js").read_text()
           css = Path("public/acceptance-ui.css").read_text()
-          combined = shell + "\n" + js + "\n" + css
+          combined = shell + "\n" + js + "\n" + routes + "\n" + css
 
           required = [
               'import "/acceptance-ui.js"',
@@ -52,6 +55,13 @@ jobs:
               '↑/↓ navigate · Enter select · Esc close',
               'subtree: false',
               'resultsReplaced',
+              'AbortController',
+              'search.sequence',
+              'input.value.trim() !== normalized',
+              'Focus alone never reopens cached results',
+              '#view-routes .route-workbench:focus-within',
+              '#view-routes .route-suggestions.open{z-index:1000',
+              '#view-routes .route-results-v2{position:relative;z-index:1',
           ]
           missing = [item for item in required if item not in combined]
           if missing:
@@ -63,5 +73,12 @@ jobs:
           dangerous = 'observer.observe(results, { childList: true, subtree: true, attributes: true'
           if dangerous in js:
               raise SystemExit("route combobox must not observe descendant class mutations; this causes a MutationObserver feedback loop")
+
+          stale_focus = 'if (results.innerHTML.trim()) results.classList.add("open")'
+          if stale_focus in routes:
+              raise SystemExit("route picker must not reopen cached suggestions on focus")
+
+          if '#view-routes .route-workbench{position:relative!important;overflow:visible!important' not in css:
+              raise SystemExit("route workbench must own an overflow-visible stacking context")
 
           print("UI acceptance contract OK")
