@@ -6,10 +6,13 @@ const COLLECTIONS = [
   ["relations", "relations"],
   ["unresolved_references", "unresolved"],
 ];
+const ESTATE_COLLECTIONS = ["entities", "relations", "unresolved"];
 
 function setBusy(value) {
   state.busy = value;
   byId("analyzeButton").disabled = value;
+  byId("verifyTokenButton").disabled = value;
+  byId("reconcileButton").disabled = value;
   byId("publishButton").disabled = value || !state.result?.quality?.valid;
   byId("archiveFile").disabled = value;
 }
@@ -26,6 +29,20 @@ function formatNumber(value) {
 
 function shortHash(value) {
   return value ? `${value.slice(0, 12)}…${value.slice(-8)}` : "—";
+}
+
+function tokenValue() {
+  return byId("adminToken").value.trim();
+}
+
+function requireToken() {
+  const token = tokenValue();
+  if (!token) {
+    status("Admin token required", "Enter ADMIN_IMPORT_TOKEN for protected import or reconciliation operations.", "warning");
+    byId("adminToken").focus();
+    return null;
+  }
+  return token;
 }
 
 async function responseJson(response) {
@@ -164,14 +181,24 @@ function manifestFor(result) {
   };
 }
 
+async function verifyToken() {
+  const token = requireToken();
+  if (!token) return;
+  setBusy(true);
+  try {
+    const data = await api("/api/v2/import/sources", token, { method: "GET" });
+    status("Admin token verified", `Protected import API accepted the token. ${formatNumber(data.sources?.length || 0)} current source(s) are active.`, "success");
+  } catch (error) {
+    status("Token verification failed", error instanceof Error ? error.message : String(error), "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function publish() {
   if (!state.result?.quality?.valid) return;
-  const token = byId("adminToken").value.trim();
-  if (!token) {
-    status("Admin token required", "Enter ADMIN_IMPORT_TOKEN to publish. The token is kept only in this page memory.", "warning");
-    byId("adminToken").focus();
-    return;
-  }
+  const token = requireToken();
+  if (!token) return;
 
   setBusy(true);
   try {
@@ -208,7 +235,7 @@ async function publish() {
     });
     status(
       "Source revision activated",
-      `${activated.source_id} is now current. Previous source revision: ${activated.previous_revision_id || "none"}.`,
+      `${activated.source_id} is now current. Reconcile the current source set to refresh the canonical estate.`,
       "success",
     );
     byId("publishResult").hidden = false;
@@ -222,20 +249,126 @@ async function publish() {
   }
 }
 
+async function fetchAllCurrent(collection, token) {
+  const items = [];
+  let offset = 0;
+  while (offset != null) {
+    status(`Reading current ${collection}`, `${formatNumber(items.length)} observation(s) loaded so far.`);
+    const page = await api(`/api/v2/observations/current/${collection}?limit=100&offset=${offset}`, token, { method: "GET" });
+    items.push(...(page.items || []));
+    offset = page.next_offset;
+  }
+  return items;
+}
+
+async function reconcileEstate() {
+  const token = requireToken();
+  if (!token) return;
+  setBusy(true);
+  byId("estateResult").hidden = true;
+  try {
+    status("Reading current source set", "Canonical reconciliation uses only source revisions that are current now.");
+    const sourceData = await api("/api/v2/import/sources", token, { method: "GET" });
+    const sources = sourceData.sources || [];
+    if (!sources.length) throw new Error("No current semantic source revisions are available to reconcile");
+
+    const entities = await fetchAllCurrent("entities", token);
+    const relations = await fetchAllCurrent("relations", token);
+    const unresolved = await fetchAllCurrent("unresolved", token);
+    status("Applying canonical identity rules", `${formatNumber(entities.length)} entity observations across ${formatNumber(sources.length)} source(s).`);
+
+    const registryResponse = await fetch("/import-runtime/semantic-registry-v1.json");
+    if (!registryResponse.ok) throw new Error(`Semantic registry failed to load (${registryResponse.status})`);
+    const registry = await registryResponse.json();
+    const { buildCanonicalEstate } = await import("/estate-builder.js");
+    const estate = await buildCanonicalEstate({ sources, entities, relations, unresolved, registry });
+
+    status(
+      "Staging canonical estate",
+      `${formatNumber(entities.length)} entity observations → ${formatNumber(estate.entities.length)} canonical entities; ${formatNumber(relations.length)} relation observations → ${formatNumber(estate.relations.length)} canonical relations.`,
+    );
+
+    const created = await api("/api/v2/estate/revisions", token, {
+      method: "POST",
+      body: JSON.stringify({
+        source_revision_ids: estate.source_revision_ids,
+        source_set_hash: estate.source_set_hash,
+        counts: {
+          entities: estate.entities.length,
+          relations: estate.relations.length,
+          unresolved: estate.unresolved.length,
+        },
+        quality: estate.quality,
+      }),
+    });
+    const estateRevisionId = created.estate_revision_id;
+    const chunkSize = Number(created.chunk_size || 75);
+    const total = estate.entities.length + estate.relations.length + estate.unresolved.length;
+    let sent = 0;
+
+    for (const collection of ESTATE_COLLECTIONS) {
+      const items = estate[collection] || [];
+      for (let start = 0; start < items.length; start += chunkSize) {
+        const chunk = items.slice(start, start + chunkSize);
+        status(
+          `Uploading canonical ${collection}`,
+          `${formatNumber(Math.min(sent + chunk.length, total))} of ${formatNumber(total)} canonical records`,
+        );
+        await api(`/api/v2/estate/revisions/${encodeURIComponent(estateRevisionId)}/${collection}`, token, {
+          method: "POST",
+          body: JSON.stringify({ items: chunk }),
+        });
+        sent += chunk.length;
+      }
+    }
+
+    status("Activating canonical estate", "Cloudflare is re-checking the source-set fingerprint, counts, and canonical relation endpoints.");
+    const activated = await api(`/api/v2/estate/revisions/${encodeURIComponent(estateRevisionId)}/activate`, token, {
+      method: "POST",
+      body: "{}",
+    });
+
+    const conflictText = estate.quality.conflicted_entities
+      ? ` ${formatNumber(estate.quality.conflicted_entities)} canonical identity conflict(s) were preserved explicitly.`
+      : "";
+    status(
+      "Canonical estate activated",
+      `Estate ${activated.estate_revision_id} is current across ${formatNumber(activated.source_revision_ids.length)} source(s).${conflictText}`,
+      estate.quality.conflicted_entities ? "warning" : "success",
+    );
+    byId("estateResult").hidden = false;
+    byId("estateResult").textContent = `${formatNumber(estate.entities.length)} canonical entities · ${formatNumber(estate.relations.length)} canonical relations · ${formatNumber(estate.unresolved.length)} unresolved references. Source set ${shortHash(estate.source_set_hash)}.`;
+    await refreshPlatformStatus();
+  } catch (error) {
+    const detail = error?.details ? ` ${JSON.stringify(error.details)}` : "";
+    status("Estate reconciliation failed", `${error instanceof Error ? error.message : String(error)}${detail}`, "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function refreshPlatformStatus() {
   try {
-    const data = await api("/api/v2/import/status", "", { method: "GET" });
-    byId("platformState").textContent = data.database_ready
-      ? `${data.enabled ? "Import enabled" : "Analysis only"} · ${formatNumber(data.current_sources)} current source(s)`
+    const [importData, estateData] = await Promise.all([
+      api("/api/v2/import/status", "", { method: "GET" }),
+      api("/api/v2/estate/status", "", { method: "GET" }),
+    ]);
+    const estateLabel = estateData.current_estate
+      ? (estateData.estate_fresh ? "estate current" : "estate stale")
+      : "estate pending";
+    byId("platformState").textContent = importData.database_ready
+      ? `${importData.enabled ? "Import enabled" : "Analysis only"} · ${formatNumber(importData.current_sources)} source(s) · ${estateLabel}`
       : "Semantic D1 migration not applied";
-    byId("platformState").dataset.ready = data.database_ready ? "true" : "false";
+    byId("platformState").dataset.ready = importData.database_ready && estateData.database_ready ? "true" : "false";
   } catch {
     byId("platformState").textContent = "Unable to read platform status";
   }
 }
 
 byId("analyzeButton").addEventListener("click", analyze);
+byId("verifyTokenButton").addEventListener("click", verifyToken);
 byId("publishButton").addEventListener("click", publish);
+byId("reconcileButton").addEventListener("click", reconcileEstate);
 byId("archiveFile").addEventListener("change", () => {
   const file = byId("archiveFile").files?.[0];
   byId("selectedFile").textContent = file ? `${file.name} · ${formatNumber(file.size)} bytes` : "No archive selected";
