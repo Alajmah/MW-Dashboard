@@ -89,11 +89,15 @@ function bindRouteComboboxes() {
     input.dataset.acceptanceBound = "true";
     syncExpanded(side);
 
-    const observer = new MutationObserver(() => {
-      resetPickerActive(side);
+    // Observe only direct result replacement plus the results container's own
+    // open/closed class. Watching descendant class mutations creates a feedback
+    // loop because keyboard highlighting intentionally changes button classes.
+    const observer = new MutationObserver((mutations) => {
+      const resultsReplaced = mutations.some((mutation) => mutation.type === "childList");
+      if (resultsReplaced) resetPickerActive(side);
       syncExpanded(side);
     });
-    observer.observe(results, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+    observer.observe(results, { childList: true, subtree: false, attributes: true, attributeFilter: ["class"] });
 
     input.addEventListener("input", () => resetPickerActive(side));
     input.addEventListener("keydown", (event) => {
