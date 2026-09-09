@@ -4,10 +4,13 @@ on:
   pull_request:
     paths:
       - "src/bootstrap.ts"
+      - "src/import-auth.ts"
       - "src/semantic-import.ts"
       - "migrations/**"
       - "scripts/prepare-import-runtime.mjs"
       - "package.json"
+      - "public/admin-import.*"
+      - "public/import-worker.js"
       - "collectors/ibm-mq/**"
       - "contracts/v2/**"
       - "services/core/registry/**"
@@ -17,10 +20,13 @@ on:
       - main
     paths:
       - "src/bootstrap.ts"
+      - "src/import-auth.ts"
       - "src/semantic-import.ts"
       - "migrations/**"
       - "scripts/prepare-import-runtime.mjs"
       - "package.json"
+      - "public/admin-import.*"
+      - "public/import-worker.js"
       - "collectors/ibm-mq/**"
       - "contracts/v2/**"
       - "services/core/registry/**"
@@ -53,6 +59,57 @@ jobs:
           cmp services/core/registry/v1.json public/import-runtime/semantic-registry-v1.json
           cmp contracts/v2/observation-bundle.schema.json public/import-runtime/observation-bundle.schema.json
 
+      - name: Import page contract
+        shell: python
+        run: |
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re
+
+          html = Path("public/admin-import.html").read_text()
+          js = Path("public/admin-import.js").read_text()
+          worker = Path("public/import-worker.js").read_text()
+          css = Path("public/admin-import.css").read_text()
+
+          class IDs(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.ids = []
+              def handle_starttag(self, tag, attrs):
+                  attrs = dict(attrs)
+                  if "id" in attrs:
+                      self.ids.append(attrs["id"])
+
+          parser = IDs()
+          parser.feed(html)
+          if len(parser.ids) != len(set(parser.ids)):
+              raise SystemExit("admin import page has duplicate ids")
+          referenced = set(re.findall(r'byId\("([A-Za-z0-9_-]+)"\)', js))
+          missing = sorted(referenced - set(parser.ids))
+          if missing:
+              raise SystemExit(f"admin import JS references missing ids: {missing}")
+
+          required = [
+              'src="/admin-import.js"',
+              'href="/admin-import.css"',
+              'raw <code>.tar.gz</code>',
+              'Atomic per-source activation',
+              'Pyodide 314.0.6',
+              'normalize_mq_observations.normalize',
+              '/api/v2/import/revisions',
+              'prefers-reduced-motion',
+          ]
+          combined = html + "\n" + js + "\n" + worker + "\n" + css
+          missing_required = [item for item in required if item not in combined]
+          if missing_required:
+              raise SystemExit(f"admin import contract missing: {missing_required}")
+          print(f"Admin import contract OK: {len(parser.ids)} ids, {len(referenced)} JS references")
+
+      - name: JavaScript syntax
+        run: |
+          node --check public/admin-import.js
+          node --check public/import-worker.js
+
       - name: Type check Worker
         run: npm run check
 
@@ -74,6 +131,16 @@ jobs:
           cat /tmp/wrangler.log
           exit 1
 
+      - name: Verify legacy import is protected
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --output /tmp/legacy-denied.json --write-out '%{http_code}' \
+            -H 'Content-Type: application/json' -X POST --data '{}' \
+            http://127.0.0.1:8787/api/v1/topology/import)"
+          test "$code" = "401"
+          grep -Fq 'Invalid or missing import authorization' /tmp/legacy-denied.json
+
       - name: Exercise staged source revision API
         shell: bash
         run: |
@@ -85,34 +152,51 @@ jobs:
           printf '%s\n' "$status" | grep -Fq '"database_ready": true'
           printf '%s\n' "$status" | grep -Fq '"enabled": true'
 
-          cat > /tmp/manifest.json <<'JSON'
+          create_revision() {
+            local run_id="$1" source_id="$2" source_name="$3" entity_name="$4"
+            cat > /tmp/manifest.json <<JSON
           {
             "schema_version":"osi.observation.bundle/v2",
-            "run_id":"ci:run:1",
+            "run_id":"$run_id",
             "environment":"ci",
             "collector":"synthetic",
             "collector_version":"1",
             "normalizer_version":"3.1.0",
             "completed_at":"2026-09-09T00:00:00Z",
-            "source":{"kind":"ibm_mq_host","id":"ci-host","display_name":"CI Host"},
+            "source":{"kind":"ibm_mq_host","id":"$source_id","display_name":"$source_name"},
             "archive":{"filename":"ci.tar.gz","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":100},
             "bundle_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             "counts":{"coverage":1,"entities":2,"relations":1,"unresolved":0},
             "quality":{"valid":true}
           }
           JSON
-          created="$(curl --fail --silent "${auth[@]}" -X POST --data @/tmp/manifest.json "$base/revisions")"
-          revision="$(python -c 'import json,sys; print(json.load(sys.stdin)["revision_id"])' <<<"$created")"
+            local created revision
+            created="$(curl --fail --silent "${auth[@]}" -X POST --data @/tmp/manifest.json "$base/revisions")"
+            revision="$(python -c 'import json,sys; print(json.load(sys.stdin)["revision_id"])' <<<"$created")"
+            curl --fail --silent "${auth[@]}" -X POST --data '{"start":0,"items":[{"scope_type":"queue_manager","scope_key":"QM1","object_class":"mq.queue","mode":"complete","properties":{}}]}' "$base/revisions/$revision/coverage" >/dev/null
+            curl --fail --silent "${auth[@]}" -X POST --data "{\"start\":0,\"items\":[{\"ref\":\"e1\",\"semantic_type\":\"mq.queue_manager\",\"identity\":{\"hints\":{\"name\":\"QM1\"}},\"display_name\":\"QM1\",\"evidence_class\":\"configured\",\"properties\":{}},{\"ref\":\"e2\",\"semantic_type\":\"mq.queue\",\"identity\":{\"hints\":{\"name\":\"$entity_name\"}},\"display_name\":\"$entity_name\",\"evidence_class\":\"configured\",\"properties\":{}}]}" "$base/revisions/$revision/entities" >/dev/null
+            curl --fail --silent "${auth[@]}" -X POST --data '{"start":0,"items":[{"ref":"r1","semantic_type":"contains","source_ref":"e1","target_ref":"e2","evidence_class":"configured","properties":{}}]}' "$base/revisions/$revision/relations" >/dev/null
+            curl --fail --silent "${auth[@]}" -X POST --data '{}' "$base/revisions/$revision/activate"
+          }
 
-          curl --fail --silent "${auth[@]}" -X POST --data '{"start":0,"items":[{"scope_type":"queue_manager","scope_key":"QM1","object_class":"mq.queue","mode":"complete","properties":{}}]}' "$base/revisions/$revision/coverage" >/dev/null
-          curl --fail --silent "${auth[@]}" -X POST --data '{"start":0,"items":[{"ref":"e1","semantic_type":"mq.queue_manager","identity":{"hints":{"name":"QM1"}},"display_name":"QM1","evidence_class":"configured","properties":{}},{"ref":"e2","semantic_type":"mq.queue","identity":{"hints":{"name":"Q1"}},"display_name":"Q1","evidence_class":"configured","properties":{}}]}' "$base/revisions/$revision/entities" >/dev/null
-          curl --fail --silent "${auth[@]}" -X POST --data '{"start":0,"items":[{"ref":"r1","semantic_type":"contains","source_ref":"e1","target_ref":"e2","evidence_class":"configured","properties":{}}]}' "$base/revisions/$revision/relations" >/dev/null
-          activated="$(curl --fail --silent "${auth[@]}" -X POST --data '{}' "$base/revisions/$revision/activate")"
-          printf '%s\n' "$activated" | grep -Fq '"status": "ACTIVE"'
-          printf '%s\n' "$activated" | grep -Fq '"source_id": "ci-host"'
+          first="$(create_revision 'ci:host-a:1' 'ci-host-a' 'CI Host A' 'Q.A.1')"
+          first_revision="$(python -c 'import json,sys; print(json.load(sys.stdin)["revision_id"])' <<<"$first")"
+          printf '%s\n' "$first" | grep -Fq '"status": "ACTIVE"'
+
+          host_b="$(create_revision 'ci:host-b:1' 'ci-host-b' 'CI Host B' 'Q.B.1')"
+          printf '%s\n' "$host_b" | grep -Fq '"previous_revision_id": null'
+
+          second="$(create_revision 'ci:host-a:2' 'ci-host-a' 'CI Host A' 'Q.A.2')"
+          printf '%s\n' "$second" | grep -Fq "\"previous_revision_id\": \"$first_revision\""
 
           sources="$(curl --fail --silent -H 'Authorization: Bearer ci-token' "$base/sources")"
-          printf '%s\n' "$sources" | grep -Fq '"source_id": "ci-host"'
+          printf '%s\n' "$sources" | grep -Fq '"source_id": "ci-host-a"'
+          printf '%s\n' "$sources" | grep -Fq '"source_id": "ci-host-b"'
+          count="$(python -c 'import json,sys; print(len(json.load(sys.stdin)["sources"]))' <<<"$sources")"
+          test "$count" = "2"
+
+          final_status="$(curl --fail --silent "$base/status")"
+          printf '%s\n' "$final_status" | grep -Fq '"current_sources": 2'
 
       - name: Stop local Worker
         if: always()
