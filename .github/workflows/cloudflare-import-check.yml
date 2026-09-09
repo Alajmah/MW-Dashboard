@@ -58,6 +58,11 @@ jobs:
           cmp collectors/ibm-mq/normalize_mq_observations.py public/import-runtime/normalize_mq_observations.py
           cmp services/core/registry/v1.json public/import-runtime/semantic-registry-v1.json
           cmp contracts/v2/observation-bundle.schema.json public/import-runtime/observation-bundle.schema.json
+          cmp node_modules/pyodide/pyodide.mjs public/import-runtime/pyodide/pyodide.mjs
+          cmp node_modules/pyodide/pyodide.asm.mjs public/import-runtime/pyodide/pyodide.asm.mjs
+          cmp node_modules/pyodide/pyodide.asm.wasm public/import-runtime/pyodide/pyodide.asm.wasm
+          cmp node_modules/pyodide/python_stdlib.zip public/import-runtime/pyodide/python_stdlib.zip
+          cmp node_modules/pyodide/pyodide-lock.json public/import-runtime/pyodide/pyodide-lock.json
 
       - name: Import page contract
         shell: python
@@ -95,6 +100,8 @@ jobs:
               'raw <code>.tar.gz</code>',
               'Atomic per-source activation',
               'const PYODIDE_VERSION = "314.0.6"',
+              'const PYODIDE_MODULE = "/import-runtime/pyodide/pyodide.mjs"',
+              'new Worker("/import-worker.js", { type: "module" })',
               'normalize_mq_observations.normalize',
               '/api/v2/import/revisions',
               'prefers-reduced-motion',
@@ -103,6 +110,10 @@ jobs:
           missing_required = [item for item in required if item not in combined]
           if missing_required:
               raise SystemExit(f"admin import contract missing: {missing_required}")
+          if "importScripts(" in worker:
+              raise SystemExit("Pyodide import worker must not use classic-worker importScripts")
+          if "cdn.jsdelivr.net" in worker:
+              raise SystemExit("Pyodide import worker must not depend on jsDelivr")
           print(f"Admin import contract OK: {len(parser.ids)} ids, {len(referenced)} JS references")
 
       - name: JavaScript syntax
@@ -130,6 +141,14 @@ jobs:
           done
           cat /tmp/wrangler.log
           exit 1
+
+      - name: Verify module runtime is served
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent http://127.0.0.1:8787/import-worker.js | grep -Fq 'type' || true
+          curl --fail --silent http://127.0.0.1:8787/import-runtime/pyodide/pyodide.mjs | grep -Fq 'loadPyodide'
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8787/import-runtime/pyodide/pyodide.asm.wasm)" = "200"
 
       - name: Verify legacy import is protected
         shell: bash
