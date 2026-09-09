@@ -1,0 +1,61 @@
+name: UI acceptance check
+
+on:
+  pull_request:
+    paths:
+      - "public/acceptance-ui.js"
+      - "public/acceptance-ui.css"
+      - "public/shell.js"
+      - ".github/workflows/ui-acceptance-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/acceptance-ui.js"
+      - "public/acceptance-ui.css"
+      - "public/shell.js"
+      - ".github/workflows/ui-acceptance-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: JavaScript syntax
+        run: node --check public/acceptance-ui.js && node --check public/shell.js
+
+      - name: Screenshot acceptance contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          shell = Path("public/shell.js").read_text()
+          js = Path("public/acceptance-ui.js").read_text()
+          css = Path("public/acceptance-ui.css").read_text()
+          combined = shell + "\n" + js + "\n" + css
+
+          required = [
+              'import "/acceptance-ui.js"',
+              'aria-autocomplete',
+              'ArrowDown',
+              'ArrowUp',
+              'Escape',
+              'keyboard-active',
+              'single-host-overview',
+              '#view-overview .section-block.two-col',
+              '.route-suggestion.keyboard-active',
+              '↑/↓ navigate · Enter select · Esc close',
+          ]
+          missing = [item for item in required if item not in combined]
+          if missing:
+              raise SystemExit(f"UI acceptance contract missing: {missing}")
+
+          if '/api/v1/topology/current' in js:
+              raise SystemExit("acceptance UI must not reintroduce legacy full-graph loading")
+
+          print("UI acceptance contract OK")
