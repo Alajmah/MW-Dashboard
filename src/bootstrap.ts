@@ -1,8 +1,10 @@
 import app from "./index";
+import { handleSemanticImport } from "./semantic-import";
 
 interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
+  ADMIN_IMPORT_TOKEN?: string;
 }
 
 const EVIDENCE_CHUNK_CHARS = 250_000;
@@ -60,6 +62,12 @@ function d1EvidenceBucket(db: D1Database): R2Bucket {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const semanticImport = await handleSemanticImport(request, {
+      DB: env.DB,
+      ADMIN_IMPORT_TOKEN: env.ADMIN_IMPORT_TOKEN,
+    });
+    if (semanticImport) return semanticImport;
+
     return app.fetch(request, {
       DB: env.DB,
       ASSETS: env.ASSETS,
