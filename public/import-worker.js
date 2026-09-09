@@ -1,5 +1,5 @@
 const PYODIDE_VERSION = "314.0.6";
-const PYODIDE_INDEX = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
+const PYODIDE_INDEX = `${self.location.origin}/import-runtime/pyodide/`;
 const RUNTIME_FILES = [
   "normalize_mq_topology.py",
   "_normalize_mq_observations_impl.py",
