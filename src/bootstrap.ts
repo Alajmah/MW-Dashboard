@@ -4,6 +4,7 @@ import { importAuthorizationDenial } from "./import-auth";
 import { handleSemanticEstate } from "./semantic-estate";
 import { handleSemanticEstateRead } from "./semantic-estate-read";
 import { handleSemanticImport } from "./semantic-import";
+import { handleSemanticRoutes } from "./semantic-routes";
 
 interface Env {
   DB: D1Database;
@@ -87,6 +88,9 @@ export default {
       ADMIN_IMPORT_TOKEN: env.ADMIN_IMPORT_TOKEN,
     });
     if (currentObservations) return currentObservations;
+
+    const semanticRoutes = await handleSemanticRoutes(request, { DB: env.DB });
+    if (semanticRoutes) return semanticRoutes;
 
     const semanticEstateRead = await handleSemanticEstateRead(request, { DB: env.DB });
     if (semanticEstateRead) return semanticEstateRead;

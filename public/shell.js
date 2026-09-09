@@ -4,13 +4,13 @@ const shellCopy = {
   servers: ["Servers", "Legacy snapshot view retained while server-specific canonical projections are migrated."],
   middleware: ["Middleware", "Legacy snapshot view retained while middleware-specific canonical projections are migrated."],
   applications: ["Applications", "Legacy snapshot view retained while application-specific canonical projections are migrated."],
-  routes: ["Routes", "Trace evidence-backed message delivery paths. Route migration to the canonical estate is the next data-plane slice."],
+  routes: ["Routes", "Trace canonical delivery semantics, runtime queue access and MQ transport while keeping access evidence distinct from actual PUT/GET activity."],
   snapshots: ["Snapshots", "Legacy discovery snapshot history retained for traceability."],
   administration: ["Administration", "Manual topology ingestion and activation."],
 };
 
 let legacyPromise = null;
-let routesPromise = null;
+let canonicalRoutesPromise = null;
 
 function shellSetView(view) {
   document.querySelectorAll("[data-view-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.viewPanel === view));
@@ -23,7 +23,7 @@ function shellSetView(view) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-async function ensureLegacy(view) {
+async function ensureLegacy() {
   if (!legacyPromise) {
     legacyPromise = import("/app.js").catch((error) => {
       legacyPromise = null;
@@ -31,30 +31,36 @@ async function ensureLegacy(view) {
     });
   }
   await legacyPromise;
-  if (view === "routes" && !routesPromise) {
-    routesPromise = import("/routes-v2.js").catch((error) => {
-      routesPromise = null;
+}
+
+async function ensureCanonicalRoutes() {
+  if (!canonicalRoutesPromise) {
+    canonicalRoutesPromise = import("/routes-estate.js").catch((error) => {
+      canonicalRoutesPromise = null;
       throw error;
     });
-    await routesPromise;
   }
+  await canonicalRoutesPromise;
 }
 
 function legacyView(view) {
-  return ["servers", "middleware", "applications", "routes", "snapshots", "administration"].includes(view);
+  return ["servers", "middleware", "applications", "snapshots", "administration"].includes(view);
 }
 
 async function navigate(view) {
   shellSetView(view);
-  if (!legacyView(view)) return;
   try {
-    await ensureLegacy(view);
+    if (view === "routes") {
+      await ensureCanonicalRoutes();
+      return;
+    }
+    if (legacyView(view)) await ensureLegacy();
   } catch (error) {
     const message = document.getElementById("globalMessage");
     if (message) {
       message.hidden = false;
       message.className = "global-message error";
-      message.textContent = `Legacy view failed to load: ${error instanceof Error ? error.message : String(error)}`;
+      message.textContent = `${view === "routes" ? "Canonical route" : "Legacy view"} failed to load: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 }
@@ -69,10 +75,10 @@ document.getElementById("jumpInventory")?.addEventListener("click", () => naviga
 
 // This document-level listener runs after any later direct listeners installed by
 // the legacy module, so canonical view copy remains authoritative when returning
-// to Overview or Explore after a legacy view has been opened.
+// to Overview, Explore, or Routes after a legacy view has been opened.
 document.addEventListener("click", (event) => {
   const view = event.target.closest("[data-view]")?.dataset.view || event.target.closest("[data-go]")?.dataset.go;
-  if (view === "overview" || view === "inventory") shellSetView(view);
+  if (view === "overview" || view === "inventory" || view === "routes") shellSetView(view);
 });
 
 shellSetView("overview");

@@ -95,7 +95,7 @@ jobs:
 
           print(f"Readability contract OK: {len(sizes)} explicit font-size rules; minimum {min(sizes):g}px")
 
-      - name: Canonical Overview and Explore contract
+      - name: Canonical Overview, Explore, and Routes contract
         shell: python
         run: |
           from pathlib import Path
@@ -103,6 +103,7 @@ jobs:
           html = Path("public/index.html").read_text()
           shell = Path("public/shell.js").read_text()
           estate = Path("public/estate-ui.js").read_text()
+          routes = Path("public/routes-estate.js").read_text()
           css = Path("public/estate-ui.css").read_text()
           required = [
               'href="/estate-ui.css"',
@@ -111,20 +112,22 @@ jobs:
               'data-view="inventory">Explore<',
               '/api/v2/estate/current/summary',
               '/api/v2/estate/current/entities',
+              '/api/v2/routes/search',
+              '/api/v2/routes/trace',
               'semantic_type',
               'identity_state',
               'next_offset',
               'Current / observed server',
               'Canonical semantic estate',
               'import("/app.js")',
-              'import("/routes-v2.js")',
+              'import("/routes-estate.js")',
           ]
-          combined = html + "\n" + shell + "\n" + estate + "\n" + css
+          combined = html + "\n" + shell + "\n" + estate + "\n" + routes + "\n" + css
           missing = [item for item in required if item not in combined]
           if missing:
               raise SystemExit(f"canonical estate UI contract missing: {missing}")
 
-          # Overview and Explore must not eagerly execute legacy graph modules.
+          # Canonical views must not eagerly execute legacy full-graph modules.
           forbidden_html = [
               'src="/app.js"',
               'src="/routes-v2.js"',
@@ -134,9 +137,9 @@ jobs:
           present = [item for item in forbidden_html if item in html]
           if present:
               raise SystemExit(f"legacy full-graph modules are still eagerly loaded: {present}")
-          if '/api/v1/topology/current' in shell or '/api/v1/topology/current' in estate:
-              raise SystemExit("initial canonical shell must not fetch the legacy full graph")
-          print("Canonical Overview/Explore contract OK")
+          if '/api/v1/topology/current' in shell or '/api/v1/topology/current' in estate or '/api/v1/topology/current' in routes:
+              raise SystemExit("canonical shell must not fetch the legacy full graph for Overview, Explore, or Routes")
+          print("Canonical Overview/Explore/Routes contract OK")
 
       - name: Semantic UX assets remain valid
         shell: python
