@@ -119,15 +119,14 @@ jobs:
               'next_offset',
               'Current / observed server',
               'Canonical semantic estate',
-              'import("/app.js")',
-              'import("/routes-estate.js")',
+              'import(`/app.js?v=${UI_ASSET_REVISION}`)',
+              'import(`/routes-estate.js?v=${UI_ASSET_REVISION}`)',
           ]
           combined = html + "\n" + shell + "\n" + estate + "\n" + routes + "\n" + css
           missing = [item for item in required if item not in combined]
           if missing:
               raise SystemExit(f"canonical estate UI contract missing: {missing}")
 
-          # Canonical views must not eagerly execute legacy full-graph modules.
           forbidden_html = [
               'src="/app.js"',
               'src="/routes-v2.js"',

@@ -1,5 +1,7 @@
-import "/canonical-ops.js";
-import "/acceptance-ui.js";
+import "/canonical-ops.js?v=20260909-3";
+import "/acceptance-ui.js?v=20260909-3";
+
+const UI_ASSET_REVISION = "20260909-3";
 
 const shellCopy = {
   overview: ["Overview", "Canonical operational view of physical placement, logical ownership, evidence quality and unresolved gaps."],
@@ -29,7 +31,7 @@ function shellSetView(view) {
 
 async function ensureLegacy() {
   if (!legacyPromise) {
-    legacyPromise = import("/app.js").catch((error) => {
+    legacyPromise = import(`/app.js?v=${UI_ASSET_REVISION}`).catch((error) => {
       legacyPromise = null;
       throw error;
     });
@@ -39,7 +41,7 @@ async function ensureLegacy() {
 
 async function ensureCanonicalRoutes() {
   if (!canonicalRoutesPromise) {
-    canonicalRoutesPromise = import("/routes-estate.js").catch((error) => {
+    canonicalRoutesPromise = import(`/routes-estate.js?v=${UI_ASSET_REVISION}`).catch((error) => {
       canonicalRoutesPromise = null;
       throw error;
     });
