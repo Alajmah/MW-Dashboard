@@ -1,0 +1,122 @@
+name: Cloudflare semantic import check
+
+on:
+  pull_request:
+    paths:
+      - "src/bootstrap.ts"
+      - "src/semantic-import.ts"
+      - "migrations/**"
+      - "scripts/prepare-import-runtime.mjs"
+      - "package.json"
+      - "collectors/ibm-mq/**"
+      - "contracts/v2/**"
+      - "services/core/registry/**"
+      - ".github/workflows/cloudflare-import-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/bootstrap.ts"
+      - "src/semantic-import.ts"
+      - "migrations/**"
+      - "scripts/prepare-import-runtime.mjs"
+      - "package.json"
+      - "collectors/ibm-mq/**"
+      - "contracts/v2/**"
+      - "services/core/registry/**"
+      - ".github/workflows/cloudflare-import-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Prepare browser import runtime
+        run: npm run prepare:import-runtime
+
+      - name: Verify runtime copies are exact
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmp collectors/ibm-mq/normalize_mq_topology.py public/import-runtime/normalize_mq_topology.py
+          cmp collectors/ibm-mq/_normalize_mq_observations_impl.py public/import-runtime/_normalize_mq_observations_impl.py
+          cmp collectors/ibm-mq/mq_cluster_semantics.py public/import-runtime/mq_cluster_semantics.py
+          cmp collectors/ibm-mq/normalize_mq_observations.py public/import-runtime/normalize_mq_observations.py
+          cmp services/core/registry/v1.json public/import-runtime/semantic-registry-v1.json
+          cmp contracts/v2/observation-bundle.schema.json public/import-runtime/observation-bundle.schema.json
+
+      - name: Type check Worker
+        run: npm run check
+
+      - name: Apply local D1 migrations
+        run: npm run db:migrate:local
+
+      - name: Start local Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler dev --local --port 8787 --var ADMIN_IMPORT_TOKEN:ci-token > /tmp/wrangler.log 2>&1 &
+          echo $! > /tmp/wrangler.pid
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8787/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/wrangler.log
+          exit 1
+
+      - name: Exercise staged source revision API
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H 'Authorization: Bearer ci-token' -H 'Content-Type: application/json')
+          base='http://127.0.0.1:8787/api/v2/import'
+
+          status="$(curl --fail --silent "$base/status")"
+          printf '%s\n' "$status" | grep -Fq '"database_ready": true'
+          printf '%s\n' "$status" | grep -Fq '"enabled": true'
+
+          cat > /tmp/manifest.json <<'JSON'
+          {
+            "schema_version":"osi.observation.bundle/v2",
+            "run_id":"ci:run:1",
+            "environment":"ci",
+            "collector":"synthetic",
+            "collector_version":"1",
+            "normalizer_version":"3.1.0",
+            "completed_at":"2026-09-09T00:00:00Z",
+            "source":{"kind":"ibm_mq_host","id":"ci-host","display_name":"CI Host"},
+            "archive":{"filename":"ci.tar.gz","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":100},
+            "bundle_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "counts":{"coverage":1,"entities":2,"relations":1,"unresolved":0},
+            "quality":{"valid":true}
+          }
+          JSON
+          created="$(curl --fail --silent "${auth[@]}" -X POST --data @/tmp/manifest.json "$base/revisions")"
+          revision="$(python -c 'import json,sys; print(json.load(sys.stdin)["revision_id"])' <<<"$created")"
+
+          curl --fail --silent "${auth[@]}" -X POST --data '{"start":0,"items":[{"scope_type":"queue_manager","scope_key":"QM1","object_class":"mq.queue","mode":"complete","properties":{}}]}' "$base/revisions/$revision/coverage" >/dev/null
+          curl --fail --silent "${auth[@]}" -X POST --data '{"start":0,"items":[{"ref":"e1","semantic_type":"mq.queue_manager","identity":{"hints":{"name":"QM1"}},"display_name":"QM1","evidence_class":"configured","properties":{}},{"ref":"e2","semantic_type":"mq.queue","identity":{"hints":{"name":"Q1"}},"display_name":"Q1","evidence_class":"configured","properties":{}}]}' "$base/revisions/$revision/entities" >/dev/null
+          curl --fail --silent "${auth[@]}" -X POST --data '{"start":0,"items":[{"ref":"r1","semantic_type":"contains","source_ref":"e1","target_ref":"e2","evidence_class":"configured","properties":{}}]}' "$base/revisions/$revision/relations" >/dev/null
+          activated="$(curl --fail --silent "${auth[@]}" -X POST --data '{}' "$base/revisions/$revision/activate")"
+          printf '%s\n' "$activated" | grep -Fq '"status": "ACTIVE"'
+          printf '%s\n' "$activated" | grep -Fq '"source_id": "ci-host"'
+
+          sources="$(curl --fail --silent -H 'Authorization: Bearer ci-token' "$base/sources")"
+          printf '%s\n' "$sources" | grep -Fq '"source_id": "ci-host"'
+
+      - name: Stop local Worker
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f /tmp/wrangler.pid ]]; then kill "$(cat /tmp/wrangler.pid)" || true; fi
+          tail -100 /tmp/wrangler.log || true
