@@ -1,0 +1,27 @@
+/* Wave 1 shell consistency and command-bar refinements. */
+.nav-mission-status{margin:0 9px 4px;padding:6px 2px;border:0!important;border-radius:0;background:transparent!important;color:#6f8494;font:600 10px/1.4 var(--mono,ui-monospace,monospace)}
+.nav-mission-status::before{content:"○";margin-right:6px;color:#526b7d}
+
+.topbar{grid-template-columns:minmax(280px,.9fr) minmax(330px,640px) auto}
+.global-semantic-search{width:100%;max-width:640px;justify-self:center}
+.global-semantic-search label{padding-right:8px}
+.global-semantic-search label>b{font-size:15px}
+.global-semantic-search kbd{flex:0 0 auto;padding:3px 6px;border:1px solid rgba(123,170,205,.22);border-bottom-color:rgba(123,170,205,.34);border-radius:5px;background:#061019;color:#8399aa;font:700 9px/1.2 var(--mono,ui-monospace,monospace);white-space:nowrap}
+.global-search-group+.global-search-group{border-top:1px solid rgba(123,170,205,.16)}
+.global-search-group-label{padding:7px 12px 5px;background:#050d13;color:#60798b;font:700 9px/1.2 var(--mono,ui-monospace,monospace);letter-spacing:.12em;text-transform:uppercase}
+.global-search-group button:last-child{border-bottom:0}
+
+.boundary-open-objects{margin-top:4px;justify-self:start}
+
+/* Universal Object Detail is a true workspace, not a modal card. */
+.object-workspace{background:#050c12}
+.object-workspace-backdrop{display:none}
+.object-workspace-shell{width:100vw!important;height:100vh!important;margin:0!important;border:0!important;border-radius:0!important;box-shadow:none!important}
+.object-workspace-head{padding-inline:max(18px,calc((100vw - 1600px)/2))}
+.object-workspace-tabs{padding-inline:max(0px,calc((100vw - 1600px)/2))}
+.object-workspace-body{padding-inline:max(18px,calc((100vw - 1600px)/2))}
+
+#jumpInventory[hidden]{display:none!important}
+
+@media(max-width:1180px){.topbar{grid-template-columns:minmax(250px,1fr) minmax(300px,1fr)}.global-semantic-search{max-width:none;justify-self:stretch}}
+@media(max-width:760px){.global-semantic-search kbd{display:none}.object-workspace-head,.object-workspace-body{padding-inline:12px}.object-workspace-tabs{padding-inline:0}}
