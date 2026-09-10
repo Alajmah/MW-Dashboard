@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mw-dashboard.local/contracts/findings/v1/finding-evidence-ref.schema.json",
+  "title": "OSI FindingEvidenceRef v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sample_id", "observed_at", "evidence_ref", "observation_types"],
+  "properties": {
+    "sample_id": {"type": "string", "minLength": 1},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "evidence_ref": {"type": "string", "minLength": 1},
+    "observation_types": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "error": {"type": ["string", "null"]}
+  }
+}
