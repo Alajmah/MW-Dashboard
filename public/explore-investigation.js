@@ -1,4 +1,4 @@
-const EXPLORE_ASSET_REVISION = "20260910-1";
+const EXPLORE_ASSET_REVISION = "20260910-2";
 
 const exploreInvestigationState = {
   summary: null,
@@ -7,6 +7,9 @@ const exploreInvestigationState = {
   detailSequence: 0,
   restoringHistory: false,
   urlTimer: null,
+  pendingScrollResets: 0,
+  pivotSequence: 0,
+  neighborCache: new Map(),
 };
 
 const xq = (id) => document.getElementById(id);
@@ -75,6 +78,17 @@ function currentView() {
   return document.querySelector(".nav-item.active")?.dataset.view || "overview";
 }
 
+function requestTableScrollReset(cycles = 3) {
+  exploreInvestigationState.pendingScrollResets = Math.max(exploreInvestigationState.pendingScrollResets, cycles);
+}
+
+function resetTableScrollIfRequested() {
+  if (exploreInvestigationState.pendingScrollResets <= 0) return;
+  const wrap = xq("inventoryRows")?.closest(".table-wrap");
+  if (wrap) wrap.scrollTop = 0;
+  exploreInvestigationState.pendingScrollResets -= 1;
+}
+
 function cleanExploreParams(url) {
   ["q", "type", "identity", "size"].forEach((key) => url.searchParams.delete(key));
 }
@@ -93,7 +107,7 @@ function syncExploreUrl({ replace = true } = {}) {
   if (size !== "50") url.searchParams.set("size", size); else url.searchParams.delete("size");
   const next = `${url.pathname}${url.search}${url.hash}`;
   if (next === `${location.pathname}${location.search}${location.hash}`) return;
-  history[replace ? "replaceState" : "pushState"]({}, "", next);
+  if (replace) history.replaceState({}, "", next); else history.pushState({}, "", next);
 }
 
 function pushViewUrl(view) {
@@ -161,6 +175,7 @@ function installScopeBar(summary) {
     if (!button) return;
     const select = xq("inventoryType");
     if (!select) return;
+    requestTableScrollReset();
     select.value = button.dataset.exploreScope || "";
     select.dispatchEvent(new Event("change", { bubbles: true }));
     updateScopeState();
@@ -179,7 +194,24 @@ function decorateRows() {
     const name = row.children[1]?.querySelector("strong")?.textContent?.trim() || "entity";
     row.setAttribute("aria-label", `Inspect ${name}`);
     row.title = `Inspect ${name}`;
+
+    const ownerRule = row.children[2]?.querySelector(".estate-owner small");
+    ownerRule?.remove();
+
+    const type = row.children[0]?.textContent?.trim() || "";
+    const serverValue = row.children[3]?.querySelector("span");
+    if (serverValue && type === "Application") {
+      serverValue.textContent = "Instance-level placement";
+      serverValue.className = "estate-server-neutral";
+    } else if (serverValue && type === "Network endpoint") {
+      serverValue.textContent = "Network evidence — not a host";
+      serverValue.className = "estate-server-neutral";
+    } else if (serverValue && type === "Cluster") {
+      serverValue.textContent = "Logical cluster scope";
+      serverValue.className = "estate-server-neutral";
+    }
   });
+  resetTableScrollIfRequested();
 }
 
 function setDetailLayout() {
@@ -194,9 +226,40 @@ function relationNeighbor(relation, entity) {
   return {
     outgoing,
     id: relation.neighbor_entity_id || (outgoing ? relation.target_entity_id : relation.source_entity_id),
-    name: relation.neighbor_display_name || relation.neighbor_entity_id || (outgoing ? relation.target_entity_id : relation.source_entity_id),
+    name: relation.neighbor_display_name || relation.neighbor_identity_key || relation.neighbor_entity_id || (outgoing ? relation.target_entity_id : relation.source_entity_id),
     type: relation.neighbor_semantic_type || "entity",
   };
+}
+
+async function loadNeighborEntity(entityId, signal) {
+  if (!entityId) return null;
+  if (exploreInvestigationState.neighborCache.has(entityId)) return exploreInvestigationState.neighborCache.get(entityId);
+  const data = await exploreApi(`/api/v2/estate/current/entities/${encodeURIComponent(entityId)}?relation_limit=1`, { signal });
+  const entity = data.entity || null;
+  if (entity) exploreInvestigationState.neighborCache.set(entityId, entity);
+  return entity;
+}
+
+async function enrichRelations(entity, relations, signal) {
+  const unresolvedIds = [];
+  for (const relation of relations || []) {
+    const neighbor = relationNeighbor(relation, entity);
+    const visible = relation.neighbor_display_name || relation.neighbor_identity_key;
+    if (!visible && neighbor.id && !exploreInvestigationState.neighborCache.has(neighbor.id)) unresolvedIds.push(neighbor.id);
+  }
+  const unique = [...new Set(unresolvedIds)].slice(0, 12);
+  await Promise.allSettled(unique.map((id) => loadNeighborEntity(id, signal)));
+  return (relations || []).map((relation) => {
+    const neighbor = relationNeighbor(relation, entity);
+    const cached = exploreInvestigationState.neighborCache.get(neighbor.id);
+    return {
+      ...relation,
+      neighbor_entity_id: neighbor.id,
+      neighbor_display_name: relation.neighbor_display_name || cached?.display_name || cached?.identity_key || neighbor.name,
+      neighbor_semantic_type: relation.neighbor_semantic_type || cached?.semantic_type || neighbor.type,
+      neighbor_identity_key: relation.neighbor_identity_key || cached?.identity_key || "",
+    };
+  });
 }
 
 function renderIdentityInspector(entity) {
@@ -226,7 +289,7 @@ function renderInvestigableRelationships(entity, relations) {
   const incoming = items.length - outgoing;
   target.innerHTML = items.length ? `<div class="explore-relation-summary"><span><strong>${outgoing}</strong> outgoing</span><span><strong>${incoming}</strong> incoming</span><span><strong>${items.length}</strong> total</span></div><div class="explore-relation-list">${items.map(({ relation, neighbor }) => {
     const evidence = Array.isArray(relation.evidence_classes) ? relation.evidence_classes.join(" · ") : "evidence";
-    return `<button type="button" class="explore-relation-link" data-neighbor-name="${xesc(neighbor.name)}" data-neighbor-type="${xesc(neighbor.type)}"><span class="explore-rel-direction">${neighbor.outgoing ? "→" : "←"}</span><span class="explore-rel-copy"><b>${xesc(relation.semantic_type)}</b><strong>${xesc(neighbor.name)}</strong><small>${xesc(typeLabel(neighbor.type))} · ${xesc(evidence)}</small></span><span class="explore-rel-action">Inspect</span></button>`;
+    return `<button type="button" class="explore-relation-link" data-neighbor-id="${xesc(neighbor.id)}" data-neighbor-name="${xesc(neighbor.name)}" data-neighbor-type="${xesc(neighbor.type)}"><span class="explore-rel-direction">${neighbor.outgoing ? "→" : "←"}</span><span class="explore-rel-copy"><b>${xesc(relation.semantic_type)}</b><strong>${xesc(neighbor.name)}</strong><small>${xesc(typeLabel(neighbor.type))} · ${xesc(evidence)}</small></span><span class="explore-rel-action">Inspect</span></button>`;
   }).join("")}</div>` : `<div class="relationship-item"><span>No canonical relationships.</span></div>`;
 }
 
@@ -262,8 +325,10 @@ async function enhanceCurrentDetail() {
   try {
     const data = await exploreApi(`/api/v2/estate/current/entities/${encodeURIComponent(id)}?relation_limit=100`, { signal: controller.signal });
     if (sequence !== exploreInvestigationState.detailSequence || id !== exploreInvestigationState.currentDetailId) return;
+    const relations = await enrichRelations(data.entity, data.relations || [], controller.signal);
+    if (sequence !== exploreInvestigationState.detailSequence || id !== exploreInvestigationState.currentDetailId) return;
     renderIdentityInspector(data.entity);
-    renderInvestigableRelationships(data.entity, data.relations || []);
+    renderInvestigableRelationships(data.entity, relations);
     installMetadataToggle();
   } catch (error) {
     if (error?.name !== "AbortError") console.warn("Explore detail enhancement failed", error);
@@ -272,21 +337,59 @@ async function enhanceCurrentDetail() {
   }
 }
 
-function inspectNeighbor(name, type) {
+async function waitForEntityRow(entityId, timeoutMs = 3500) {
+  if (!entityId) return null;
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const row = document.querySelector(`tr[data-estate-entity-id="${CSS.escape(entityId)}"]`);
+    if (row) return row;
+    await sleep(80);
+  }
+  return null;
+}
+
+async function inspectNeighbor(entityId, fallbackName, fallbackType) {
+  const sequence = ++exploreInvestigationState.pivotSequence;
   const search = xq("inventorySearch");
   const typeSelect = xq("inventoryType");
   const identity = xq("inventoryServer");
   if (!search || !typeSelect || !identity) return;
-  xq("closeDetail")?.click();
+
+  let target = exploreInvestigationState.neighborCache.get(entityId) || null;
+  if (!target && entityId) {
+    try { target = await loadNeighborEntity(entityId); } catch {}
+  }
+  if (sequence !== exploreInvestigationState.pivotSequence) return;
+
+  const name = target?.display_name || target?.identity_key || fallbackName || entityId;
+  const type = target?.semantic_type || fallbackType || "";
+  if (!name) return;
+
+  requestTableScrollReset(4);
   search.value = name;
   identity.value = "";
-  if ([...typeSelect.options].some((option) => option.value === type)) typeSelect.value = type; else typeSelect.value = "";
+  typeSelect.value = [...typeSelect.options].some((option) => option.value === type) ? type : "";
   typeSelect.dispatchEvent(new Event("change", { bubbles: true }));
   identity.dispatchEvent(new Event("change", { bubbles: true }));
   search.dispatchEvent(new Event("input", { bubbles: true }));
   updateScopeState();
   scheduleUrlSync();
-  search.focus();
+
+  let row = await waitForEntityRow(entityId);
+  if (!row && target?.identity_key && target.identity_key !== name) {
+    search.value = target.identity_key;
+    requestTableScrollReset(3);
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    scheduleUrlSync();
+    row = await waitForEntityRow(entityId);
+  }
+  if (sequence !== exploreInvestigationState.pivotSequence) return;
+  if (row) {
+    row.click();
+    row.scrollIntoView({ block: "center" });
+  } else {
+    search.focus();
+  }
 }
 
 function bindInvestigationInteractions() {
@@ -341,21 +444,48 @@ function bindInvestigationInteractions() {
       } catch {}
       return;
     }
-    const relation = event.target.closest("[data-neighbor-name]");
-    if (relation) inspectNeighbor(relation.dataset.neighborName || "", relation.dataset.neighborType || "");
+    const relation = event.target.closest("[data-neighbor-id]");
+    if (relation) {
+      inspectNeighbor(
+        relation.dataset.neighborId || "",
+        relation.dataset.neighborName || "",
+        relation.dataset.neighborType || "",
+      );
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("#estatePrev, #estateNext")) requestTableScrollReset(3);
+  }, true);
+}
+
+function shieldCanonicalInventoryControls() {
+  const controls = [
+    ["inventorySearch", "input", true],
+    ["inventoryType", "change", true],
+    ["inventoryServer", "change", true],
+    ["inventoryOwner", "change", true],
+    ["inventoryReset", "click", true],
+    ["closeDetail", "click", false],
+  ];
+  controls.forEach(([id, eventName, resetsTable]) => {
+    const control = xq(id);
+    if (!control) return;
+    control.addEventListener(eventName, (event) => {
+      if (currentView() !== "inventory") return;
+      if (resetsTable) requestTableScrollReset();
+      if (id !== "closeDetail") {
+        updateScopeState();
+        scheduleUrlSync();
+      }
+      // Canonical estate listeners are registered first in capture phase. Stop here
+      // so legacy inventory listeners loaded later cannot mutate canonical controls.
+      event.stopImmediatePropagation();
+    }, true);
   });
 }
 
 function bindUrlState() {
-  ["inventorySearch", "inventoryType", "inventoryServer", "inventoryOwner"].forEach((id) => {
-    const control = xq(id);
-    if (!control) return;
-    control.addEventListener(id === "inventorySearch" ? "input" : "change", () => {
-      updateScopeState();
-      scheduleUrlSync();
-    });
-  });
-
   document.addEventListener("click", (event) => {
     const target = event.target.closest("[data-view], [data-go]");
     const view = target?.dataset.view || target?.dataset.go;
@@ -382,6 +512,7 @@ async function restoreUrlState() {
     const typeValue = url.searchParams.get("type") || "";
     const identityValue = url.searchParams.get("identity") || "";
     const sizeValue = url.searchParams.get("size") || "50";
+    requestTableScrollReset(4);
     search.value = queryValue;
     type.value = [...type.options].some((option) => option.value === typeValue) ? typeValue : "";
     identity.value = [...identity.options].some((option) => option.value === identityValue) ? identityValue : "";
@@ -407,6 +538,7 @@ async function initExploreInvestigation() {
     installScopeBar(exploreInvestigationState.summary);
   } catch {}
   bindInvestigationInteractions();
+  shieldCanonicalInventoryControls();
   bindUrlState();
   await restoreUrlState();
 }
