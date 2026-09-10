@@ -1,0 +1,72 @@
+name: Wave 1 shell consistency check
+
+on:
+  pull_request:
+    paths:
+      - "public/wave1-shell-cleanup.js"
+      - "public/wave1-shell-cleanup.css"
+      - "public/shell.js"
+      - ".github/workflows/wave1-shell-consistency-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/wave1-shell-cleanup.js"
+      - "public/wave1-shell-cleanup.css"
+      - "public/shell.js"
+      - ".github/workflows/wave1-shell-consistency-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: JavaScript syntax
+        run: node --check public/wave1-shell-cleanup.js && node --check public/shell.js
+
+      - name: Shell consistency contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          js = Path("public/wave1-shell-cleanup.js").read_text()
+          css = Path("public/wave1-shell-cleanup.css").read_text()
+          shell = Path("public/shell.js").read_text()
+          combined = js + "\n" + css + "\n" + shell
+
+          required = [
+              'import "/wave1-shell-cleanup.js?v=20260910-1"',
+              'Open Queue Managers',
+              'action.dataset.go = "qmgrs"',
+              'ACE workspace — awaiting evidence source',
+              'Collection revisions',
+              'Evidence sources, imports and retained canonical revisions',
+              'input.placeholder = "Search estate…"',
+              'event.key.toLowerCase() === "k"',
+              'event.key === "/"',
+              'global-search-group-label',
+              'QM ${qmgr}',
+              'window.osiOpenObjectWorkspace',
+              'jump.hidden = inObjects',
+              'Investigate client-side evidence in Objects',
+              'object-workspace-shell{width:100vw!important;height:100vh!important',
+          ]
+          missing = [item for item in required if item not in combined]
+          if missing:
+              raise SystemExit(f"Wave 1 shell consistency contract missing: {missing}")
+
+          if '/api/v1/topology/current' in js:
+              raise SystemExit("Wave 1 shell search must remain canonical-only")
+          if 'Math.random' in js:
+              raise SystemExit("Wave 1 shell cleanup must not fabricate state")
+          if css.count('{') != css.count('}'):
+              raise SystemExit("wave1-shell-cleanup.css has unbalanced braces")
+          if 'url(http://' in css or 'url(https://' in css or '@import url(' in css:
+              raise SystemExit("Wave 1 shell cleanup must not depend on external visual assets")
+
+          print("Wave 1 shell consistency contract OK")
