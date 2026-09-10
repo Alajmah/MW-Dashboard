@@ -1,8 +1,9 @@
-import "/canonical-ops.js?v=20260910-2";
-import "/acceptance-ui.js?v=20260910-2";
-import "/explore-investigation.js?v=20260910-2";
+import "/canonical-ops.js?v=20260910-3";
+import "/acceptance-ui.js?v=20260910-3";
+import "/explore-investigation.js?v=20260910-3";
+import "/explore-boundary.js?v=20260910-3";
 
-const UI_ASSET_REVISION = "20260910-2";
+const UI_ASSET_REVISION = "20260910-3";
 
 const shellCopy = {
   overview: ["Overview", "Canonical operational view of physical placement, logical ownership, evidence quality and unresolved gaps."],
@@ -65,6 +66,10 @@ async function navigate(view) {
       await window.osiRenderCanonicalServers?.();
       return;
     }
+    if (view === "inventory") {
+      await window.osiRestoreCanonicalExploreControls?.();
+      return;
+    }
     if (legacyView(view)) {
       await ensureLegacy();
       window.osiApplyCanonicalShell?.();
@@ -97,6 +102,10 @@ document.addEventListener("click", (event) => {
     shellSetView(view);
     if (view === "servers") setTimeout(() => window.osiRenderCanonicalServers?.(), 0);
     if (view === "overview") setTimeout(() => window.osiRenderQmgrLedger?.(), 0);
+    if (view === "inventory") {
+      setTimeout(() => window.osiRestoreCanonicalExploreControls?.(), 0);
+      setTimeout(() => window.osiRestoreCanonicalExploreControls?.(), 120);
+    }
   }
 });
 
