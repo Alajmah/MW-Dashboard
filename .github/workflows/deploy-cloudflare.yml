@@ -107,3 +107,12 @@ jobs:
           response="$(curl --fail --silent --show-error --retry 8 --retry-all-errors --retry-delay 2 https://mw-dashboard.saeedm309.workers.dev/api/v2/estate/status)"
           printf '%s\n' "$response"
           printf '%s\n' "$response" | grep -Fq '"database_ready": true'
+
+      - name: Smoke test operational findings status
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 8 --retry-all-errors --retry-delay 2 https://mw-dashboard.saeedm309.workers.dev/api/v2/operations/status)"
+          printf '%s\n' "$response"
+          printf '%s\n' "$response" | grep -Fq '"database_ready": true'
+          printf '%s\n' "$response" | grep -Fq '"schema_version": "osi.operations.read/v1"'
