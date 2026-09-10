@@ -1,0 +1,87 @@
+name: Workstation UI check
+
+on:
+  pull_request:
+    paths:
+      - "public/workstation-ui.js"
+      - "public/workstation-ui.css"
+      - "public/shell.js"
+      - ".github/workflows/workstation-ui-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/workstation-ui.js"
+      - "public/workstation-ui.css"
+      - "public/shell.js"
+      - ".github/workflows/workstation-ui-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: JavaScript syntax
+        run: node --check public/workstation-ui.js && node --check public/shell.js
+
+      - name: Workstation interaction contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          js = Path("public/workstation-ui.js").read_text()
+          css = Path("public/workstation-ui.css").read_text()
+          shell = Path("public/shell.js").read_text()
+          combined = js + "\n" + css + "\n" + shell
+
+          required = [
+              'import "/workstation-ui.js?v=20260910-1"',
+              'MAX_COMPARE = 3',
+              'osi.compare.v1',
+              'estateId: workstationState.estateId',
+              'Compare is scoped to one semantic type',
+              'workstationCompareModal',
+              'Differences only',
+              'CURATED_COMPARE_FIELDS',
+              'relativeAge',
+              'Activated ${relativeAge(exact)}',
+              'workstation-live-age',
+              'CONTEXT_COLUMNS',
+              'Queue manager',
+              'QM placement',
+              'Network evidence',
+              'routeLiveInterpretation',
+              'routeLiveTraceToggle',
+              'Live trace evaluates the current canonical evidence automatically',
+              'it does not create or infer PUT/GET activity evidence',
+              'routeLastAutoKey',
+              'currentRouteKey',
+              'observer.observe(rows, { childList: true, subtree: false })',
+              'observer.observe(facts, { childList: true, subtree: false })',
+          ]
+          missing = [item for item in required if item not in combined]
+          if missing:
+              raise SystemExit(f"Workstation UI contract missing: {missing}")
+
+          if '/api/v1/topology/current' in js:
+              raise SystemExit("Workstation UI must remain canonical-only")
+
+          if 'Math.random' in js:
+              raise SystemExit("Workstation UI must remain deterministic")
+
+          dangerous = [
+              'subtree: true, attributes: true',
+              'attributes: true, subtree: true',
+          ]
+          if any(item in js for item in dangerous):
+              raise SystemExit("Workstation UI must not use broad descendant attribute observers")
+
+          if 'timeline' in js.lower() and 'history' in js.lower():
+              raise SystemExit("Do not fabricate timeline/history UI before longitudinal evidence exists")
+
+          print("Workstation UI interaction contract OK")
