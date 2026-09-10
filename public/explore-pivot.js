@@ -8,6 +8,15 @@ const pivotState = {
 const pq = (id) => document.getElementById(id);
 const psleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function installPivotStyles() {
+  if (document.querySelector('link[data-explore-pivot]')) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = `/explore-pivot.css?v=${EXPLORE_PIVOT_REVISION}`;
+  link.dataset.explorePivot = "true";
+  document.head.appendChild(link);
+}
+
 function currentView() {
   return document.querySelector(".nav-item.active")?.dataset.view || "overview";
 }
@@ -233,6 +242,7 @@ function installPivotGuards() {
 }
 
 async function initExplorePivot() {
+  installPivotStyles();
   const started = Date.now();
   while (Date.now() - started < 8000) {
     if (pq("inventoryRows") && pq("inventoryType") && pq("detailRelationships")) {
