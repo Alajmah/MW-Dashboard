@@ -6,8 +6,9 @@ import "/explore-boundary.js?v=20260910-4";
 import "/explore-pivot.js?v=20260910-4";
 import "/workstation-ui.js?v=20260910-1";
 import "/wave1-shell-cleanup.js?v=20260910-1";
+import "/operational-intelligence.js?v=20260910-1";
 
-const UI_ASSET_REVISION = "20260910-6";
+const UI_ASSET_REVISION = "20260910-7";
 
 const shellCopy = {
   overview: ["Overview", "Evidence-backed operational attention across the current canonical middleware estate."],
@@ -35,6 +36,7 @@ function shellSetView(view) {
   window.osiApplyCanonicalShell?.();
   window.osiRefreshWorkstationUI?.();
   window.osiProductShellRefresh?.();
+  window.osiRefreshOperationalIntelligence?.();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -80,6 +82,7 @@ async function navigate(view) {
     if (view === "inventory") {
       await window.osiRestoreCanonicalExploreControls?.();
       window.osiProductShellRefresh?.();
+      window.osiRefreshOperationalIntelligence?.();
       return;
     }
     if (legacyView(view)) {
@@ -115,12 +118,16 @@ document.addEventListener("click", (event) => {
     shellSetView(view);
     if (view === "servers") setTimeout(() => window.osiRenderCanonicalServers?.(), 0);
     if (view === "qmgrs") setTimeout(() => window.osiRenderQueueManagers?.(), 0);
-    if (view === "overview") setTimeout(() => window.osiRenderQmgrLedger?.(), 0);
+    if (view === "overview") {
+      setTimeout(() => window.osiRenderQmgrLedger?.(), 0);
+      setTimeout(() => window.osiRefreshOperationalIntelligence?.(), 80);
+    }
     if (view === "inventory") {
       setTimeout(() => window.osiRestoreCanonicalExploreControls?.(), 0);
       setTimeout(() => window.osiRestoreCanonicalExploreControls?.(), 120);
       setTimeout(() => window.osiRefreshWorkstationUI?.(), 160);
       setTimeout(() => window.osiProductShellRefresh?.(), 180);
+      setTimeout(() => window.osiRefreshOperationalIntelligence?.(), 200);
     }
     if (view === "routes") setTimeout(() => window.osiRefreshWorkstationUI?.(), 120);
   }
