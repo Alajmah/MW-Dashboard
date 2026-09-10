@@ -5,6 +5,8 @@ on:
     paths:
       - "public/explore-investigation.js"
       - "public/explore-boundary.js"
+      - "public/explore-pivot.js"
+      - "public/explore-pivot.css"
       - "public/explore-investigation.css"
       - "public/shell.js"
       - ".github/workflows/explore-investigation-check.yml"
@@ -14,6 +16,8 @@ on:
     paths:
       - "public/explore-investigation.js"
       - "public/explore-boundary.js"
+      - "public/explore-pivot.js"
+      - "public/explore-pivot.css"
       - "public/explore-investigation.css"
       - "public/shell.js"
       - ".github/workflows/explore-investigation-check.yml"
@@ -29,7 +33,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: JavaScript syntax
-        run: node --check public/explore-investigation.js && node --check public/explore-boundary.js && node --check public/shell.js
+        run: node --check public/explore-investigation.js && node --check public/explore-boundary.js && node --check public/explore-pivot.js && node --check public/shell.js
 
       - name: Investigation UX contract
         shell: python
@@ -38,13 +42,16 @@ jobs:
 
           js = Path("public/explore-investigation.js").read_text()
           boundary = Path("public/explore-boundary.js").read_text()
+          pivot = Path("public/explore-pivot.js").read_text()
+          pivot_css = Path("public/explore-pivot.css").read_text()
           css = Path("public/explore-investigation.css").read_text()
           shell = Path("public/shell.js").read_text()
-          combined = js + "\n" + boundary + "\n" + css + "\n" + shell
+          combined = js + "\n" + boundary + "\n" + pivot + "\n" + pivot_css + "\n" + css + "\n" + shell
 
           required = [
-              'import "/explore-investigation.js?v=20260910-3"',
-              'import "/explore-boundary.js?v=20260910-3"',
+              'import "/explore-investigation.js?v=20260910-4"',
+              'import "/explore-boundary.js?v=20260910-4"',
+              'import "/explore-pivot.js?v=20260910-4"',
               'Quick semantic scopes',
               'data-explore-scope',
               'history.replaceState',
@@ -76,19 +83,25 @@ jobs:
               'resolveOpaqueRelationshipNeighbors',
               'observer.observe(select, { childList: true, subtree: false })',
               'osiRestoreCanonicalExploreControls',
+              'pivotToRelationshipTarget',
+              'humanEntityName',
+              'Opening related canonical entity',
+              'observer.observe(rows, { childList: true, subtree: false })',
+              'Relationship detail is capped at 100 records in this view',
+              'explore-pivot-message',
           ]
           missing = [item for item in required if item not in combined]
           if missing:
               raise SystemExit(f"Explore investigation contract missing: {missing}")
 
-          if '/api/v1/topology/current' in js or '/api/v1/topology/current' in boundary:
+          if '/api/v1/topology/current' in js or '/api/v1/topology/current' in boundary or '/api/v1/topology/current' in pivot:
               raise SystemExit("Explore investigation layers must remain canonical-only")
 
           dangerous = [
               'subtree: true, attributes: true',
               'attributes: true, subtree: true',
           ]
-          if any(item in js or item in boundary for item in dangerous):
+          if any(item in js or item in boundary or item in pivot for item in dangerous):
               raise SystemExit("Explore investigation must not observe descendant attributes")
 
           if 'observer.observe(rows, { childList: true, subtree: false })' not in js:
@@ -96,5 +109,8 @@ jobs:
 
           if 'function inspectNeighbor(name, type)' in js:
               raise SystemExit("Relationship inspect must resolve by canonical entity ID, not a display-name-only pivot")
+
+          if 'target?.identity_key || fallbackName' in pivot or 'search.value = target.identity_key' in pivot:
+              raise SystemExit("Serialized pivot must not fall back to a canonical identity key in the visible search box")
 
           print("Explore investigation UX contract OK")
