@@ -54,7 +54,7 @@ jobs:
               'fetchAllEntities("mq.queue")',
               'fetchAllEntities("mq.channel")',
               'fetchAllEntities("mq.listener")',
-              'id="objectWorkspace"',
+              'workspace.id = "objectWorkspace"',
               'Why OSI believes this entity exists',
               'No PUT/GET activity claims are present.',
               'Runtime queue access is not promoted to message activity.',
