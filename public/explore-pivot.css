@@ -1,0 +1,4 @@
+.explore-pivot-message{margin:10px 12px 0;padding:8px 10px;border:1px solid var(--border,#203241);border-radius:6px;background:rgba(9,20,28,.92);font-size:12px;line-height:1.4;color:var(--muted,#9fb0bf)}
+.explore-pivot-message.info{border-color:rgba(56,189,248,.35);color:#b7e9fb}
+.explore-pivot-message.error{border-color:rgba(248,113,113,.4);background:rgba(69,10,10,.18);color:#fecaca}
+.explore-pivot-message[hidden]{display:none}
