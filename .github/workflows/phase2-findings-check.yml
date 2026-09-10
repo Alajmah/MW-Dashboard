@@ -1,0 +1,46 @@
+name: Phase 2 findings foundation check
+
+on:
+  pull_request:
+    paths:
+      - "collectors/ibm-mq/evaluate_findings_v1.py"
+      - "collectors/ibm-mq/test_findings_v1.py"
+      - "contracts/findings/v1/**"
+      - "docs/phase-2-evidence-linked-findings-v1.md"
+      - ".github/workflows/phase2-findings-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "collectors/ibm-mq/evaluate_findings_v1.py"
+      - "collectors/ibm-mq/test_findings_v1.py"
+      - "contracts/findings/v1/**"
+      - "docs/phase-2-evidence-linked-findings-v1.md"
+      - ".github/workflows/phase2-findings-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Python syntax
+        run: |
+          python3 -m py_compile collectors/ibm-mq/evaluate_findings_v1.py
+          python3 -m py_compile collectors/ibm-mq/test_findings_v1.py
+
+      - name: Contract JSON syntax
+        run: |
+          for schema in contracts/findings/v1/*.json; do
+            python3 -m json.tool "$schema" >/dev/null
+          done
+
+      - name: Evaluator help path
+        run: python3 collectors/ibm-mq/evaluate_findings_v1.py --help >/dev/null
+
+      - name: Findings rule tests
+        run: python3 collectors/ibm-mq/test_findings_v1.py
