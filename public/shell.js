@@ -3,6 +3,7 @@ import "/acceptance-ui.js?v=20260910-4";
 import "/explore-investigation.js?v=20260910-4";
 import "/explore-boundary.js?v=20260910-4";
 import "/explore-pivot.js?v=20260910-4";
+import "/workstation-ui.js?v=20260910-1";
 
 const UI_ASSET_REVISION = "20260910-4";
 
@@ -29,6 +30,7 @@ function shellSetView(view) {
   if (title) title.textContent = copy[0];
   if (subtitle) subtitle.textContent = copy[1];
   window.osiApplyCanonicalShell?.();
+  window.osiRefreshWorkstationUI?.();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -106,7 +108,9 @@ document.addEventListener("click", (event) => {
     if (view === "inventory") {
       setTimeout(() => window.osiRestoreCanonicalExploreControls?.(), 0);
       setTimeout(() => window.osiRestoreCanonicalExploreControls?.(), 120);
+      setTimeout(() => window.osiRefreshWorkstationUI?.(), 160);
     }
+    if (view === "routes") setTimeout(() => window.osiRefreshWorkstationUI?.(), 120);
   }
 });
 
