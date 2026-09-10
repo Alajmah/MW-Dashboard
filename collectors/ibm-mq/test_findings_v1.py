@@ -91,6 +91,11 @@ class FindingsV1RuleTests(unittest.TestCase):
         expected_queue = "cent_" + findings.sha256_text(f"mq.queue|rule_2|{key}")[:24]
         self.assertEqual(findings.scoped_entity_id("mq.queue", "SVHUB01P", "APP.OUT"), expected_queue)
 
+    def test_instance_discriminator_prevents_channel_observation_id_collision(self):
+        a = findings.observation_id("cent_" + "a" * 24, "mq.channel.status", "sample_001", "channel-status.out", "job-a")
+        b = findings.observation_id("cent_" + "a" * 24, "mq.channel.status", "sample_001", "channel-status.out", "job-b")
+        self.assertNotEqual(a, b)
+
     def test_parse_display_blocks(self):
         text = """Starting MQSC.\nAMQ8450I: Display queue status details.\n   QUEUE(A) TYPE(QUEUE) CURDEPTH(2) IPPROCS(0)\n   MSGAGE(44)\nAMQ8450I: Display queue status details.\n   QUEUE(B) TYPE(QUEUE) CURDEPTH(0) IPPROCS(1)\n"""
         records = findings.parse_blocks(text)
