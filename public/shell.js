@@ -1,3 +1,4 @@
+import "/product-shell.js?v=20260910-1";
 import "/canonical-ops.js?v=20260910-4";
 import "/acceptance-ui.js?v=20260910-4";
 import "/explore-investigation.js?v=20260910-4";
@@ -5,16 +6,17 @@ import "/explore-boundary.js?v=20260910-4";
 import "/explore-pivot.js?v=20260910-4";
 import "/workstation-ui.js?v=20260910-1";
 
-const UI_ASSET_REVISION = "20260910-4";
+const UI_ASSET_REVISION = "20260910-5";
 
 const shellCopy = {
-  overview: ["Overview", "Canonical operational view of physical placement, logical ownership, evidence quality and unresolved gaps."],
-  inventory: ["Explore", "Search the canonical semantic estate with server-side pagination and explicit ownership, placement and evidence context."],
+  overview: ["Overview", "Evidence-backed operational attention across the current canonical middleware estate."],
+  inventory: ["Objects", "Search and investigate canonical middleware objects with explicit ownership, placement and evidence context."],
+  qmgrs: ["Queue Managers", "Canonical IBM MQ ownership, physical placement, clusters, object counts and evidence freshness."],
   servers: ["Servers", "Physical middleware hosts and confirmed queue-manager placement. Client IPs remain application/network evidence, not physical servers."],
   middleware: ["Middleware", "Legacy snapshot view retained while middleware-specific canonical projections are migrated."],
   applications: ["Applications", "Legacy snapshot view retained while application-specific canonical projections are migrated."],
   routes: ["Routes", "Trace canonical delivery semantics, runtime queue access and MQ transport while keeping access evidence distinct from actual PUT/GET activity."],
-  snapshots: ["Snapshots", "Legacy discovery snapshot history retained for traceability."],
+  snapshots: ["Collection", "Discovery and collection history retained for traceability while canonical revision history evolves."],
   administration: ["Administration", "Manual topology ingestion and activation."],
 };
 
@@ -31,6 +33,7 @@ function shellSetView(view) {
   if (subtitle) subtitle.textContent = copy[1];
   window.osiApplyCanonicalShell?.();
   window.osiRefreshWorkstationUI?.();
+  window.osiProductShellRefresh?.();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -69,20 +72,26 @@ async function navigate(view) {
       await window.osiRenderCanonicalServers?.();
       return;
     }
+    if (view === "qmgrs") {
+      await window.osiRenderQueueManagers?.();
+      return;
+    }
     if (view === "inventory") {
       await window.osiRestoreCanonicalExploreControls?.();
+      window.osiProductShellRefresh?.();
       return;
     }
     if (legacyView(view)) {
       await ensureLegacy();
       window.osiApplyCanonicalShell?.();
+      window.osiProductShellRefresh?.();
     }
   } catch (error) {
     const message = document.getElementById("globalMessage");
     if (message) {
       message.hidden = false;
       message.className = "global-message error";
-      const source = view === "routes" ? "Canonical route" : view === "servers" ? "Canonical server" : "Legacy view";
+      const source = view === "routes" ? "Canonical route" : view === "servers" ? "Canonical server" : view === "qmgrs" ? "Canonical queue manager" : "Legacy view";
       message.textContent = `${source} failed to load: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
@@ -101,17 +110,20 @@ document.getElementById("jumpInventory")?.addEventListener("click", () => naviga
 // module has been loaded during the same browser session.
 document.addEventListener("click", (event) => {
   const view = event.target.closest("[data-view]")?.dataset.view || event.target.closest("[data-go]")?.dataset.go;
-  if (["overview", "inventory", "routes", "servers"].includes(view)) {
+  if (["overview", "inventory", "routes", "servers", "qmgrs"].includes(view)) {
     shellSetView(view);
     if (view === "servers") setTimeout(() => window.osiRenderCanonicalServers?.(), 0);
+    if (view === "qmgrs") setTimeout(() => window.osiRenderQueueManagers?.(), 0);
     if (view === "overview") setTimeout(() => window.osiRenderQmgrLedger?.(), 0);
     if (view === "inventory") {
       setTimeout(() => window.osiRestoreCanonicalExploreControls?.(), 0);
       setTimeout(() => window.osiRestoreCanonicalExploreControls?.(), 120);
       setTimeout(() => window.osiRefreshWorkstationUI?.(), 160);
+      setTimeout(() => window.osiProductShellRefresh?.(), 180);
     }
     if (view === "routes") setTimeout(() => window.osiRefreshWorkstationUI?.(), 120);
   }
 });
 
+window.osiNavigateProduct = navigate;
 shellSetView("overview");
