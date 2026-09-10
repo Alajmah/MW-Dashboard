@@ -1,8 +1,8 @@
-import "/canonical-ops.js?v=20260910-1";
-import "/acceptance-ui.js?v=20260910-1";
-import "/explore-investigation.js?v=20260910-1";
+import "/canonical-ops.js?v=20260910-2";
+import "/acceptance-ui.js?v=20260910-2";
+import "/explore-investigation.js?v=20260910-2";
 
-const UI_ASSET_REVISION = "20260910-1";
+const UI_ASSET_REVISION = "20260910-2";
 
 const shellCopy = {
   overview: ["Overview", "Canonical operational view of physical placement, logical ownership, evidence quality and unresolved gaps."],

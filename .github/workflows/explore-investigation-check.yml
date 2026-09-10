@@ -40,13 +40,21 @@ jobs:
           combined = js + "\n" + css + "\n" + shell
 
           required = [
-              'import "/explore-investigation.js?v=20260910-1"',
+              'import "/explore-investigation.js?v=20260910-2"',
               'Quick semantic scopes',
               'data-explore-scope',
-              '"replaceState"',
-              '"pushState"',
+              'history.replaceState',
+              'history.pushState',
               'popstate',
-              'data-neighbor-name',
+              'data-neighbor-id',
+              'neighborCache',
+              'loadNeighborEntity',
+              'waitForEntityRow',
+              'stopImmediatePropagation',
+              'pendingScrollResets',
+              'estate-server-neutral',
+              'Instance-level placement',
+              'Network evidence — not a host',
               'Canonical identity',
               'Copy identity key',
               'Show raw properties & provenance',
@@ -56,6 +64,7 @@ jobs:
               '.inventory-layout:not(.explore-detail-open) .object-detail',
               '.inventory-layout.explore-detail-open',
               'thead th{position:sticky',
+              '.metadata-list .estate-provenance-row',
           ]
           missing = [item for item in required if item not in combined]
           if missing:
@@ -73,5 +82,8 @@ jobs:
 
           if 'observer.observe(rows, { childList: true, subtree: false })' not in js:
               raise SystemExit("Explore row observer must be direct-child-only")
+
+          if 'function inspectNeighbor(name, type)' in js:
+              raise SystemExit("Relationship inspect must resolve by canonical entity ID, not a display-name-only pivot")
 
           print("Explore investigation UX contract OK")
