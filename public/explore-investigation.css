@@ -8,6 +8,7 @@
 #view-inventory tbody tr[role="button"]{cursor:pointer}
 #view-inventory tbody tr[role="button"]:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;background:#0c1922}
 #view-inventory tbody tr[aria-selected="true"]{box-shadow:inset 2px 0 var(--accent)}
+#view-inventory .estate-server-neutral{color:#8ea0ad!important;font-style:normal}
 
 .explore-scopebar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border-top:1px solid #172530;border-bottom:1px solid #172530;background:#070c11}
 .explore-scope-buttons{display:flex;align-items:center;gap:5px;flex-wrap:wrap;min-width:0}
@@ -46,6 +47,13 @@
 .explore-rel-action{color:#75cfff;font-size:8.5px;text-transform:uppercase;letter-spacing:.05em}
 .explore-metadata-toggle{width:100%;min-height:30px;margin-bottom:7px;font-size:9px}
 
+/* Scope raw metadata selectors so nested provenance rows do not inherit the outer definition-list grid. */
+#view-inventory .metadata-list>div{display:grid;grid-template-columns:120px minmax(0,1fr);gap:10px;align-items:start}
+#view-inventory .metadata-list .estate-provenance{display:grid;grid-template-columns:minmax(0,1fr);gap:7px;min-width:0}
+#view-inventory .metadata-list .estate-provenance-row{display:block!important;min-width:0;padding:8px 9px!important}
+#view-inventory .metadata-list .estate-provenance-row strong{display:block!important;width:auto!important}
+#view-inventory .metadata-list .estate-provenance-row span{display:block!important;width:auto!important;min-width:0;word-break:normal!important;overflow-wrap:anywhere!important;white-space:normal!important}
+
 @media(min-width:1700px){
   #view-inventory .inventory-layout.explore-detail-open{grid-template-columns:minmax(0,1fr) minmax(450px,520px)!important}
   #view-inventory .table-wrap{max-height:calc(100vh - 300px)}
@@ -70,4 +78,5 @@
   .explore-relation-link{grid-template-columns:20px minmax(0,1fr)}
   .explore-rel-action{display:none}
   .explore-rel-copy b,.explore-rel-copy strong,.explore-rel-copy small{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+  #view-inventory .metadata-list>div{grid-template-columns:1fr;gap:3px}
 }
