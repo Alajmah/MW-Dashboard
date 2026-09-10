@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mw-dashboard.local/contracts/findings/v1/coverage-state.schema.json",
+  "title": "OSI CoverageState v1",
+  "type": "string",
+  "enum": ["sufficient", "limited", "partial", "failed", "unknown"]
+}
