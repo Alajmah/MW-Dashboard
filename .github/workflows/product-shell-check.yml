@@ -1,0 +1,85 @@
+name: Product shell check
+
+on:
+  pull_request:
+    paths:
+      - "public/product-shell.js"
+      - "public/product-shell.css"
+      - "public/shell.js"
+      - ".github/workflows/product-shell-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/product-shell.js"
+      - "public/product-shell.css"
+      - "public/shell.js"
+      - ".github/workflows/product-shell-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: JavaScript syntax
+        run: node --check public/product-shell.js && node --check public/shell.js
+
+      - name: Final product shell contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          js = Path("public/product-shell.js").read_text()
+          css = Path("public/product-shell.css").read_text()
+          shell = Path("public/shell.js").read_text()
+          combined = js + "\n" + css + "\n" + shell
+
+          required = [
+              'import "/product-shell.js?v=20260910-1"',
+              'missionGroup("Monitor"',
+              'missionGroup("Operate"',
+              'missionGroup("Develop"',
+              'missionGroup("System"',
+              'qmgr.dataset.view = "qmgrs"',
+              'existing.inventory.textContent = "Objects"',
+              'id="globalSemanticSearch"',
+              '/api/v2/estate/current/entities?',
+              'window.osiRenderQueueManagers',
+              'Queue manager estate',
+              'fetchAllEntities("mq.queue")',
+              'fetchAllEntities("mq.channel")',
+              'fetchAllEntities("mq.listener")',
+              'id="objectWorkspace"',
+              'Why OSI believes this entity exists',
+              'No PUT/GET activity claims are present.',
+              'Runtime queue access is not promoted to message activity.',
+              'history.pushState',
+              'searchParams.set("entity"',
+              'window.osiOpenObjectWorkspace',
+              'qmgrs: ["Queue Managers"',
+              'inventory: ["Objects"',
+          ]
+          missing = [item for item in required if item not in combined]
+          if missing:
+              raise SystemExit(f"product shell contract missing: {missing}")
+
+          if '/api/v1/topology/current' in js:
+              raise SystemExit("final product shell must remain canonical-only")
+          if 'Math.random' in js:
+              raise SystemExit("product shell must not fabricate demo state")
+          if '98.7%' in combined or 'Healthy' in js:
+              raise SystemExit("product shell must not invent synthetic health")
+          dangerous = ['subtree: true, attributes: true', 'attributes: true, subtree: true']
+          if any(item in js for item in dangerous):
+              raise SystemExit("product shell must not install broad descendant attribute observers")
+          if css.count('{') != css.count('}'):
+              raise SystemExit("product-shell.css has unbalanced braces")
+          if 'url(http://' in css or 'url(https://' in css or '@import url(' in css:
+              raise SystemExit("product shell must not depend on external visual assets")
+
+          print("Final product shell contract OK")
