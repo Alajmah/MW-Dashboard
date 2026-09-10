@@ -1,0 +1,77 @@
+name: Explore investigation check
+
+on:
+  pull_request:
+    paths:
+      - "public/explore-investigation.js"
+      - "public/explore-investigation.css"
+      - "public/shell.js"
+      - ".github/workflows/explore-investigation-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/explore-investigation.js"
+      - "public/explore-investigation.css"
+      - "public/shell.js"
+      - ".github/workflows/explore-investigation-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: JavaScript syntax
+        run: node --check public/explore-investigation.js && node --check public/shell.js
+
+      - name: Investigation UX contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          js = Path("public/explore-investigation.js").read_text()
+          css = Path("public/explore-investigation.css").read_text()
+          shell = Path("public/shell.js").read_text()
+          combined = js + "\n" + css + "\n" + shell
+
+          required = [
+              'import "/explore-investigation.js?v=20260910-1"',
+              'Quick semantic scopes',
+              'data-explore-scope',
+              'history.pushState',
+              'history.replaceState',
+              'popstate',
+              'data-neighbor-name',
+              'Canonical identity',
+              'Copy identity key',
+              'Show raw properties & provenance',
+              'role", "button"',
+              'aria-selected',
+              'explore-detail-open',
+              '.inventory-layout:not(.explore-detail-open) .object-detail',
+              '.inventory-layout.explore-detail-open',
+              'thead th{position:sticky',
+          ]
+          missing = [item for item in required if item not in combined]
+          if missing:
+              raise SystemExit(f"Explore investigation contract missing: {missing}")
+
+          if '/api/v1/topology/current' in js:
+              raise SystemExit("Explore investigation layer must remain canonical-only")
+
+          dangerous = [
+              'subtree: true, attributes: true',
+              'attributes: true, subtree: true',
+          ]
+          if any(item in js for item in dangerous):
+              raise SystemExit("Explore investigation must not observe descendant attributes")
+
+          if 'observer.observe(rows, { childList: true, subtree: false })' not in js:
+              raise SystemExit("Explore row observer must be direct-child-only")
+
+          print("Explore investigation UX contract OK")
