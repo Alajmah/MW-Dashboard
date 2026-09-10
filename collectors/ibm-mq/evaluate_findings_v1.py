@@ -1,24 +1,12 @@
 #!/usr/bin/env python3
-"""OSI Phase 2 Findings v1 evaluator for IBM MQ raw evidence.
+"""Offline/read-only OSI Findings v1 evaluator for IBM MQ raw evidence.
 
-This is deliberately an offline/read-only evaluator. It reads an existing
-mq-topology-*.tar.gz collector artifact, promotes selected runtime facts into
-OSI-owned operational observations, evaluates a conservative first rule set,
-and emits evidence-linked findings.
-
-It does not connect to IBM MQ, mutate queue-manager state, consume event queues,
-or depend on Prometheus/Grafana/OpenTelemetry or any third-party monitoring
-runtime.
+Reads an existing mq-topology-*.tar.gz only. It never connects to MQ, consumes
+messages, mutates queue-manager state, or uses an external monitoring runtime.
 """
-
 from __future__ import annotations
 
-import argparse
-import hashlib
-import json
-import math
-import re
-import tarfile
+import argparse, hashlib, json, math, re, tarfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
@@ -26,138 +14,94 @@ from typing import Any, Iterable
 
 SCHEMA_VERSION = "osi.findings.evaluation/v1"
 EVALUATOR_VERSION = "1.0.0"
-
-DISPLAY_MARKER_RE = re.compile(r"^AMQ\d+[A-Z]:\s+Display\b", re.IGNORECASE)
-ATTRIBUTE_RE = re.compile(r"\b([A-Z][A-Z0-9_]*)\(([^()]*)\)")
-MQ_MESSAGE_RE = re.compile(r"\b(AMQ\d{4}[A-Z]):\s*([^\r\n]*)", re.IGNORECASE)
-EMPTY_ENUMERATION_CODES = frozenset({"AMQ8147E", "AMQ8933I"})
-
-NORMAL_QMGR_STATES = frozenset({"RUNNING"})
-NORMAL_LISTENER_STATES = frozenset({"RUNNING"})
-NORMAL_CHANNEL_STATES = frozenset({"RUNNING"})
+DISPLAY_RE = re.compile(r"^AMQ\d+[A-Z]:\s+Display\b", re.I)
+ATTR_RE = re.compile(r"\b([A-Z][A-Z0-9_]*)\(([^()]*)\)")
+MQMSG_RE = re.compile(r"\b(AMQ\d{4}[A-Z]):\s*([^\r\n]*)", re.I)
+EMPTY_CODES = frozenset({"AMQ8147E", "AMQ8933I"})
 
 
 def sha256_text(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return hashlib.sha256(value.encode()).hexdigest()
 
 
 def sha256_file(filename: str) -> str:
-    digest = hashlib.sha256()
+    h = hashlib.sha256()
     with open(filename, "rb") as fh:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+            h.update(chunk)
+    return h.hexdigest()
 
 
-def canonical_id(semantic_type: str, rule: str, key: str) -> str:
-    return "cent_" + sha256_text(f"{semantic_type}|{rule}|{key}")[:24]
+def canonical_id(kind: str, rule: str, key: str) -> str:
+    return "cent_" + sha256_text(f"{kind}|{rule}|{key}")[:24]
 
 
 def qmgr_entity_id(name: str, qmid: str | None = None) -> str:
-    if qmid:
-        return canonical_id("mq.queue_manager", "qmid", qmid.strip().lower())
-    return canonical_id("mq.queue_manager", "name", name.strip().lower())
+    return canonical_id("mq.queue_manager", "qmid" if qmid else "name", (qmid or name).strip().lower())
 
 
-def scoped_entity_id(semantic_type: str, qmgr: str, name: str) -> str:
+def scoped_entity_id(kind: str, qmgr: str, name: str) -> str:
     key = f"queue_manager_key={qmgr.strip().lower()}|name={name.strip().lower()}"
-    return canonical_id(semantic_type, "rule_2", key)
+    return canonical_id(kind, "rule_2", key)
 
 
-def finding_id(rule_id: str, entity_id: str) -> str:
-    return "find_" + sha256_text(f"{rule_id}|{entity_id}")[:24]
+def finding_id(rule: str, entity: str) -> str:
+    return "find_" + sha256_text(f"{rule}|{entity}")[:24]
 
 
-def observation_id(entity_id: str, observation_type: str, sample_id: str, evidence_ref: str) -> str:
-    return "obs_" + sha256_text(f"{entity_id}|{observation_type}|{sample_id}|{evidence_ref}")[:24]
+def observation_id(entity: str, metric: str, sample: str, evidence: str, discriminator: str = "") -> str:
+    return "obs_" + sha256_text(f"{entity}|{metric}|{sample}|{evidence}|{discriminator}")[:24]
 
 
 def parse_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text or text in {"-", "N/A"}:
-        return None
     try:
-        return int(text)
-    except ValueError:
+        text = str(value).strip()
+        return int(text) if text and text not in {"-", "N/A", "None"} else None
+    except (TypeError, ValueError):
         return None
 
 
 def parse_blocks(text: str) -> list[dict[str, str]]:
-    """Parse DISPLAY output into records without relying on product libraries."""
-    records: list[dict[str, str]] = []
-    current: dict[str, str] = {}
-    saw_marker = False
+    out, current, active = [], {}, False
     for line in text.splitlines():
-        if DISPLAY_MARKER_RE.search(line.strip()):
-            if saw_marker and current:
-                records.append(current)
-                current = {}
-            saw_marker = True
+        if DISPLAY_RE.search(line.strip()):
+            if active and current:
+                out.append(current)
+            current, active = {}, True
             continue
-        if not saw_marker:
-            continue
-        for key, value in ATTRIBUTE_RE.findall(line):
-            current[key] = value.strip()
+        if active:
+            for key, value in ATTR_RE.findall(line):
+                current[key] = value.strip()
     if current:
-        records.append(current)
-    return records
-
-
-def iso_to_epoch(value: str) -> float:
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-
-
-def elapsed_seconds(samples: list["SampleRecord"]) -> float:
-    if len(samples) < 2:
-        return 0.0
-    return max(0.0, iso_to_epoch(samples[-1].observed_at) - iso_to_epoch(samples[0].observed_at))
+        out.append(current)
+    return out
 
 
 class RawArchive:
     def __init__(self, filename: str):
         self.filename = filename
         self.tf = tarfile.open(filename, "r:gz")
-        roots = {
-            PurePosixPath(member.name).parts[0]
-            for member in self.tf.getmembers()
-            if member.name and PurePosixPath(member.name).parts
-        }
+        roots = {PurePosixPath(m.name).parts[0] for m in self.tf.getmembers() if m.name and PurePosixPath(m.name).parts}
         if len(roots) != 1:
-            self.tf.close()
-            raise ValueError("raw archive must contain exactly one top-level directory")
+            self.tf.close(); raise ValueError("raw archive must contain exactly one top-level directory")
         self.root = next(iter(roots))
-        self._names = {member.name for member in self.tf.getmembers() if member.isfile()}
+        self.names = {m.name for m in self.tf.getmembers() if m.isfile()}
 
-    def close(self) -> None:
-        self.tf.close()
-
-    def has(self, rel: str) -> bool:
-        return f"{self.root}/{rel}" in self._names
-
+    def close(self): self.tf.close()
+    def has(self, rel: str) -> bool: return f"{self.root}/{rel}" in self.names
     def text(self, rel: str, required: bool = True) -> str:
-        name = f"{self.root}/{rel}"
-        try:
-            member = self.tf.getmember(name)
+        try: member = self.tf.getmember(f"{self.root}/{rel}")
         except KeyError:
-            if required:
-                raise ValueError(f"archive member missing: {rel}")
+            if required: raise ValueError(f"archive member missing: {rel}")
             return ""
         fh = self.tf.extractfile(member)
-        if fh is None:
-            if required:
-                raise ValueError(f"archive member is not readable: {rel}")
+        if not fh:
+            if required: raise ValueError(f"archive member unreadable: {rel}")
             return ""
         return fh.read().decode("utf-8", errors="replace")
-
     def members(self, prefix: str) -> list[str]:
-        wanted = f"{self.root}/{prefix.rstrip('/')}/"
-        out: list[str] = []
-        for member in self.tf.getmembers():
-            if member.isfile() and member.name.startswith(wanted):
-                out.append(member.name[len(self.root) + 1 :])
-        return out
+        base = f"{self.root}/{prefix.rstrip('/')}/"
+        return [m.name[len(self.root)+1:] for m in self.tf.getmembers() if m.isfile() and m.name.startswith(base)]
 
 
 @dataclass(frozen=True)
@@ -180,579 +124,209 @@ class SampleRecord:
     values: dict[str, str]
 
 
-def read_rc(archive: RawArchive, base: str) -> int | None:
-    raw = archive.text(base + ".rc", False).strip()
-    if not raw:
-        return None
-    try:
-        return int(raw)
-    except ValueError:
-        return None
+def command_outcome(a: RawArchive, base: str, ok: str = "point_in_time") -> CommandOutcome:
+    evidence = base + ".out"
+    if not a.has(evidence) and not a.has(base + ".rc"):
+        return CommandOutcome("not_collected", evidence, "command evidence missing", None)
+    raw_rc = a.text(base + ".rc", False).strip()
+    try: rc = int(raw_rc) if raw_rc else None
+    except ValueError: rc = None
+    messages = [(c.upper(), t.strip()) for c, t in MQMSG_RE.findall(a.text(evidence, False)+"\n"+a.text(base+".err", False))]
+    codes = {c for c, _ in messages}
+    cmd = a.text(base + ".mqsc", False).strip().upper()
+    empty = rc == 10 and cmd.startswith("DISPLAY ") and "(*)" in cmd and bool(messages) and codes.issubset(EMPTY_CODES) and all("not found" in t.lower() for _, t in messages)
+    if empty: return CommandOutcome(ok, evidence, None, rc, True)
+    errors = sorted(c for c in codes if c.endswith("E"))
+    if rc not in (None, 0) or errors:
+        bits = ([f"process rc={rc}"] if rc not in (None, 0) else []) + (["MQ errors="+",".join(errors)] if errors else [])
+        return CommandOutcome("failed", evidence, "; ".join(bits) or "command failed", rc)
+    return CommandOutcome(ok, evidence, None, rc)
 
 
-def command_outcome(archive: RawArchive, base: str, success_mode: str = "point_in_time") -> CommandOutcome:
-    evidence_ref = base + ".out"
-    if not archive.has(evidence_ref) and not archive.has(base + ".rc"):
-        return CommandOutcome("not_collected", evidence_ref, "command evidence missing", None)
-    rc = read_rc(archive, base)
-    out = archive.text(evidence_ref, False)
-    err = archive.text(base + ".err", False)
-    messages = [(code.upper(), text.strip()) for code, text in MQ_MESSAGE_RE.findall(out + "\n" + err)]
-    command = archive.text(base + ".mqsc", False).strip()
-    codes = {code for code, _ in messages}
-    wildcard = command.upper().startswith("DISPLAY ") and "(*)" in command.upper()
-    known_empty = (
-        rc == 10
-        and wildcard
-        and bool(messages)
-        and codes.issubset(EMPTY_ENUMERATION_CODES)
-        and all("not found" in text.lower() for _, text in messages)
-    )
-    if known_empty:
-        return CommandOutcome(success_mode, evidence_ref, None, rc, True)
-    error_codes = sorted(code for code in codes if code.endswith("E"))
-    if rc not in (None, 0) or error_codes:
-        parts = []
-        if rc not in (None, 0):
-            parts.append(f"process rc={rc}")
-        if error_codes:
-            parts.append("MQ errors=" + ",".join(error_codes))
-        return CommandOutcome("failed", evidence_ref, "; ".join(parts) or "command failed", rc)
-    return CommandOutcome(success_mode, evidence_ref, None, rc)
+def manifest(a: RawArchive) -> dict[str, str]:
+    return {k.strip(): v.strip() for line in a.text("manifest.properties").splitlines() if "=" in line for k, v in [line.split("=", 1)]}
 
 
-def qmgr_rows(archive: RawArchive) -> list[tuple[str, str]]:
-    rows: list[tuple[str, str]] = []
-    for line in archive.text("qmgrs.tsv").splitlines()[1:]:
-        if "\t" not in line:
-            continue
-        qdir, qname = [part.strip() for part in line.split("\t", 1)]
-        if qdir and qname:
-            rows.append((qdir, qname))
-    return rows
+def qmgr_rows(a: RawArchive) -> list[tuple[str, str]]:
+    return [tuple(x.strip() for x in line.split("\t", 1)) for line in a.text("qmgrs.tsv").splitlines()[1:] if "\t" in line]
 
 
-def runtime_samples(archive: RawArchive, qdir: str) -> list[str]:
+def runtime_samples(a: RawArchive, qdir: str) -> list[str]:
     found = set()
-    for rel in archive.members(f"qmgr/{qdir}/runtime"):
-        parts = PurePosixPath(rel).parts
-        if len(parts) >= 4 and parts[0] == "qmgr" and parts[1] == qdir and parts[2] == "runtime":
-            found.add(parts[3])
+    for rel in a.members(f"qmgr/{qdir}/runtime"):
+        p = PurePosixPath(rel).parts
+        if len(p) >= 4: found.add(p[3])
     return sorted(found)
 
 
-def sample_time(archive: RawArchive, qdir: str, sample: str, fallback: str) -> str:
-    value = archive.text(f"qmgr/{qdir}/runtime/{sample}/captured-at-utc.txt", False).strip()
-    return value or fallback
+def sample_time(a: RawArchive, qdir: str, sample: str, fallback: str) -> str:
+    return a.text(f"qmgr/{qdir}/runtime/{sample}/captured-at-utc.txt", False).strip() or fallback
 
 
-def manifest(archive: RawArchive) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for line in archive.text("manifest.properties").splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            result[key.strip()] = value.strip()
-    return result
-
-
-def qmgr_config(archive: RawArchive, qdir: str) -> dict[str, str]:
+def qmgr_config(a: RawArchive, qdir: str) -> dict[str, str]:
     base = f"qmgr/{qdir}/config/qmgr"
-    if command_outcome(archive, base, "complete").mode != "complete":
-        return {}
-    blocks = parse_blocks(archive.text(base + ".out", False))
-    return blocks[0] if blocks else {}
+    if command_outcome(a, base, "complete").mode != "complete": return {}
+    rows = parse_blocks(a.text(base + ".out", False)); return rows[0] if rows else {}
 
 
-def sample_records(
-    archive: RawArchive,
-    qdir: str,
-    qmgr: str,
-    sample: str,
-    label: str,
-    semantic_type: str,
-    object_field: str,
-    fallback_time: str,
-) -> tuple[CommandOutcome, list[SampleRecord]]:
+def get_records(a: RawArchive, qdir: str, qmgr: str, sample: str, label: str, kind: str, name_field: str, fallback: str):
     base = f"qmgr/{qdir}/runtime/{sample}/{label}"
-    outcome = command_outcome(archive, base)
-    if outcome.mode != "point_in_time":
-        return outcome, []
-    observed_at = sample_time(archive, qdir, sample, fallback_time)
-    records: list[SampleRecord] = []
-    for values in parse_blocks(archive.text(base + ".out", False)):
-        name = values.get(object_field, "").strip()
-        if not name:
-            if semantic_type == "mq.queue_manager":
-                name = qmgr
-            else:
-                continue
-        records.append(SampleRecord(qmgr, name, semantic_type, sample, observed_at, outcome.evidence_ref, values))
-    return outcome, records
+    outcome = command_outcome(a, base)
+    if outcome.mode != "point_in_time": return outcome, []
+    ts = sample_time(a, qdir, sample, fallback)
+    rows = []
+    for values in parse_blocks(a.text(base + ".out", False)):
+        name = values.get(name_field, "").strip() or (qmgr if kind == "mq.queue_manager" else "")
+        if name: rows.append(SampleRecord(qmgr, name, kind, sample, ts, outcome.evidence_ref, values))
+    return outcome, rows
 
 
 def series_by_object(records: Iterable[SampleRecord]) -> dict[str, list[SampleRecord]]:
-    result: dict[str, list[SampleRecord]] = {}
-    for record in records:
-        result.setdefault(record.object_name, []).append(record)
-    for items in result.values():
-        items.sort(key=lambda item: item.observed_at)
-    return result
+    out: dict[str, list[SampleRecord]] = {}
+    for r in records: out.setdefault(r.object_name, []).append(r)
+    for rows in out.values(): rows.sort(key=lambda r: r.observed_at)
+    return out
 
+
+def _epoch(ts: str): return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
 
 def linear_slope(values: list[int | float]) -> float:
-    n = len(values)
-    if n < 2:
-        return 0.0
-    xs = list(range(n))
-    xbar = sum(xs) / n
-    ybar = sum(values) / n
-    denom = sum((x - xbar) ** 2 for x in xs)
-    if denom == 0:
-        return 0.0
-    return sum((x - xbar) * (y - ybar) for x, y in zip(xs, values)) / denom
+    if len(values) < 2: return 0.0
+    n=len(values); xb=(n-1)/2; yb=sum(values)/n; den=sum((x-xb)**2 for x in range(n))
+    return sum((x-xb)*(y-yb) for x,y in enumerate(values))/den if den else 0.0
 
 
 def queue_backlog_increasing(samples: list[SampleRecord]) -> bool:
-    if len(samples) < 3:
-        return False
-    depths = [parse_int(item.values.get("CURDEPTH")) for item in samples]
-    if any(value is None for value in depths):
-        return False
-    values = [int(value) for value in depths if value is not None]
-    if values[-1] <= values[0] or values[-1] <= 0:
-        return False
-    if linear_slope(values) <= 0:
-        return False
-    tail = values[-3:]
-    if any(right < left for left, right in zip(tail, tail[1:])):
-        return False
-    positive_steps = sum(1 for left, right in zip(values, values[1:]) if right > left)
-    return positive_steps >= max(2, math.ceil((len(values) - 1) * 0.5))
+    if len(samples) < 3: return False
+    vals=[parse_int(r.values.get("CURDEPTH")) for r in samples]
+    if any(v is None for v in vals): return False
+    d=[int(v) for v in vals if v is not None]
+    positives=sum(b>a for a,b in zip(d,d[1:]))
+    return d[-1]>d[0] and d[-1]>0 and linear_slope(d)>0 and all(b>=a for a,b in zip(d[-3:],d[-2:])) and positives>=max(2, math.ceil((len(d)-1)*.5))
 
 
 def queue_oldest_message_aging(samples: list[SampleRecord]) -> bool:
-    if len(samples) < 3:
-        return False
-    ages = [parse_int(item.values.get("MSGAGE")) for item in samples]
-    depths = [parse_int(item.values.get("CURDEPTH")) for item in samples]
-    if any(value is None for value in ages) or any(value is None for value in depths):
-        return False
-    a = [int(value) for value in ages if value is not None]
-    d = [int(value) for value in depths if value is not None]
-    if min(d[-3:]) <= 0 or a[-1] <= a[0] or a[-1] <= 0:
-        return False
-    if any(right < left for left, right in zip(a[-3:], a[-2:])):
-        return False
-    elapsed = elapsed_seconds(samples)
-    growth = a[-1] - a[0]
-    return elapsed > 0 and growth >= elapsed * 0.55
+    if len(samples) < 3: return False
+    ages=[parse_int(r.values.get("MSGAGE")) for r in samples]; depths=[parse_int(r.values.get("CURDEPTH")) for r in samples]
+    if any(v is None for v in ages+depths): return False
+    a=[int(v) for v in ages if v is not None]; d=[int(v) for v in depths if v is not None]
+    elapsed=max(0, _epoch(samples[-1].observed_at)-_epoch(samples[0].observed_at))
+    return min(d[-3:])>0 and a[-1]>a[0] and a[-1]>0 and all(b>=x for x,b in zip(a[-3:],a[-2:])) and elapsed>0 and (a[-1]-a[0])>=elapsed*.55
 
 
-def all_zero_input_processes(samples: list[SampleRecord]) -> bool:
-    values = [parse_int(item.values.get("IPPROCS")) for item in samples]
-    return bool(values) and all(value == 0 for value in values if value is not None) and all(value is not None for value in values)
+def all_zero_input_processes(samples):
+    vals=[parse_int(r.values.get("IPPROCS")) for r in samples]
+    return bool(vals) and all(v is not None and v==0 for v in vals)
 
 
-def any_output_process(samples: list[SampleRecord]) -> bool:
-    values = [parse_int(item.values.get("OPPROCS")) for item in samples]
-    return any(value is not None and value > 0 for value in values)
+def any_output_process(samples): return any((parse_int(r.values.get("OPPROCS")) or 0)>0 for r in samples)
+def is_system_queue(name: str): return name.upper().startswith(("SYSTEM.", "AMQ.", "KMQ."))
 
 
-def is_system_queue(name: str) -> bool:
-    upper = name.upper()
-    return upper.startswith("SYSTEM.") or upper.startswith("AMQ.") or upper.startswith("KMQ.")
+def channel_instance_dimensions(r: SampleRecord):
+    v=r.values; parts=[str(v.get(k) or "").strip() for k in ("JOBNAME","CONNAME","RAPPLTAG")]
+    key="|".join(x for x in parts if x) or "default"
+    return key, {"channel_instance_key":key,"job_name":v.get("JOBNAME") or None,"connection_name":v.get("CONNAME") or None,"remote_application":v.get("RAPPLTAG") or None,"remote_queue_manager":v.get("RQMNAME") or None,"channel_type":v.get("CHLTYPE") or None}
 
 
-def observation(
-    *, entity_id: str, semantic_type: str, display_name: str, observation_type: str,
-    observed_at: str, value: Any, unit: str, source_id: str, source_host: str,
-    qmgr: str, sample_id: str, evidence_ref: str, collection_method: str,
-    quality: str = "sampled",
-) -> dict[str, Any]:
-    return {
-        "observation_id": observation_id(entity_id, observation_type, sample_id, evidence_ref),
-        "entity_id": entity_id,
-        "semantic_type": semantic_type,
-        "display_name": display_name,
-        "observation_type": observation_type,
-        "observed_at": observed_at,
-        "value": value,
-        "unit": unit,
-        "source": {
-            "source_id": source_id,
-            "source_host": source_host,
-            "queue_manager": qmgr,
-            "collection_method": collection_method,
-            "evidence_class": "observed",
-            "evidence_ref": evidence_ref,
-            "sample_id": sample_id,
-        },
-        "quality": {"coverage": "point_in_time", "freshness": quality},
-    }
+def obs(entity, kind, name, metric, r, value, unit, source_id, source_host, method, discriminator="", dimensions=None):
+    item={"observation_id":observation_id(entity,metric,r.sample_id,r.evidence_ref,discriminator),"entity_id":entity,"semantic_type":kind,"display_name":name,"observation_type":metric,"observed_at":r.observed_at,"value":value,"unit":unit,"source":{"source_id":source_id,"source_host":source_host,"queue_manager":r.qmgr,"collection_method":method,"evidence_class":"observed","evidence_ref":r.evidence_ref,"sample_id":r.sample_id},"quality":{"coverage":"point_in_time","freshness":"sampled"}}
+    if dimensions: item["dimensions"]=dimensions
+    return item
 
 
-def evidence_ref(record: SampleRecord, observation_types: list[str]) -> dict[str, Any]:
-    return {
-        "sample_id": record.sample_id,
-        "observed_at": record.observed_at,
-        "evidence_ref": record.evidence_ref,
-        "observation_types": observation_types,
-    }
-
-
-def finding(
-    *, rule_id: str, entity_id: str, semantic_type: str, display_name: str,
-    severity: str, summary: str, diagnosis: str, confidence: str,
-    confidence_score: float, first_seen: str, last_seen: str,
-    evidence: list[dict[str, Any]], coverage_state: str = "sufficient",
-    details: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    return {
-        "finding_id": finding_id(rule_id, entity_id),
-        "rule_id": rule_id,
-        "entity_id": entity_id,
-        "semantic_type": semantic_type,
-        "display_name": display_name,
-        "severity": severity,
-        "status": "OPEN",
-        "summary": summary,
-        "diagnosis": diagnosis,
-        "confidence": {"level": confidence, "score": confidence_score},
-        "first_seen": first_seen,
-        "last_seen": last_seen,
-        "coverage_state": coverage_state,
-        "evidence": evidence,
-        "related_entities": [],
-        "details": details or {},
-    }
-
-
-def coverage_item(qmgr: str, family: str, sample_id: str, outcome: CommandOutcome, observed_at: str) -> dict[str, Any]:
-    return {
-        "scope_type": "queue_manager",
-        "scope_key": qmgr,
-        "observation_family": family,
-        "sample_id": sample_id,
-        "observed_at": observed_at,
-        "state": outcome.mode,
-        "evidence_ref": outcome.evidence_ref,
-        "error": outcome.error,
-    }
+def ev(r, metrics): return {"sample_id":r.sample_id,"observed_at":r.observed_at,"evidence_ref":r.evidence_ref,"observation_types":metrics}
+def make_finding(rule, entity, kind, name, severity, summary, diagnosis, confidence, score, first, last, evidence, coverage="sufficient", details=None):
+    return {"finding_id":finding_id(rule,entity),"rule_id":rule,"entity_id":entity,"semantic_type":kind,"display_name":name,"severity":severity,"status":"OPEN","summary":summary,"diagnosis":diagnosis,"confidence":{"level":confidence,"score":score},"first_seen":first,"last_seen":last,"coverage_state":coverage,"evidence":evidence,"related_entities":[],"details":details or {}}
 
 
 def evaluate_archive(filename: str) -> dict[str, Any]:
-    archive = RawArchive(filename)
+    a=RawArchive(filename)
     try:
-        mf = manifest(archive)
-        if mf.get("format") != "osi-mq-topology-raw" or mf.get("format_version") != "1":
-            raise ValueError("unsupported IBM MQ raw evidence format")
-        completed_at = mf.get("completed_at_utc") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        source_host = archive.text("host/hostname.out", False).strip() or mf.get("host", "unknown")
-        source_id = (archive.text("host/hostname-fqdn.out", False).strip() or source_host).lower()
+        mf=manifest(a)
+        if mf.get("format")!="osi-mq-topology-raw" or mf.get("format_version")!="1": raise ValueError("unsupported IBM MQ raw evidence format")
+        completed=mf.get("completed_at_utc") or datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
+        host=a.text("host/hostname.out",False).strip() or mf.get("host","unknown")
+        source_id=(a.text("host/hostname-fqdn.out",False).strip() or host).lower()
+        observations=[]; coverage=[]; findings=[]; qms=[]
+        specs=(("qmgr-status","mq.queue_manager","QMNAME"),("listener-status","mq.listener","LISTENER"),("channel-status","mq.channel","CHANNEL"),("queue-status","mq.queue","QUEUE"))
 
-        observations: list[dict[str, Any]] = []
-        coverage: list[dict[str, Any]] = []
-        findings: list[dict[str, Any]] = []
-        qmgr_summaries: list[dict[str, Any]] = []
-
-        for qdir, qmgr in qmgr_rows(archive):
-            cfg = qmgr_config(archive, qdir)
-            qmid = cfg.get("QMID") or None
-            qm_id = qmgr_entity_id(qmgr, qmid)
-            samples = runtime_samples(archive, qdir)
-            family_records: dict[str, list[SampleRecord]] = {
-                "qmgr-status": [], "listener-status": [], "channel-status": [], "queue-status": []
-            }
-            family_outcomes: dict[str, list[tuple[str, str, CommandOutcome]]] = {key: [] for key in family_records}
-            specs = (
-                ("qmgr-status", "mq.queue_manager", "QMNAME"),
-                ("listener-status", "mq.listener", "LISTENER"),
-                ("channel-status", "mq.channel", "CHANNEL"),
-                ("queue-status", "mq.queue", "QUEUE"),
-            )
+        for qdir,qmgr in qmgr_rows(a):
+            cfg=qmgr_config(a,qdir); qmid=cfg.get("QMID") or None; qmid_id=qmgr_entity_id(qmgr,qmid)
+            records={label:[] for label,_,_ in specs}; outcomes={label:[] for label,_,_ in specs}; samples=runtime_samples(a,qdir)
             for sample in samples:
-                observed_at = sample_time(archive, qdir, sample, completed_at)
-                for label, semantic_type, object_field in specs:
-                    outcome, records = sample_records(
-                        archive, qdir, qmgr, sample, label, semantic_type, object_field, completed_at
-                    )
-                    family_outcomes[label].append((sample, observed_at, outcome))
-                    coverage.append(coverage_item(qmgr, label, sample, outcome, observed_at))
-                    family_records[label].extend(records)
+                ts=sample_time(a,qdir,sample,completed)
+                for label,kind,name_field in specs:
+                    outcome,rows=get_records(a,qdir,qmgr,sample,label,kind,name_field,completed)
+                    outcomes[label].append((sample,ts,outcome)); records[label].extend(rows)
+                    coverage.append({"scope_type":"queue_manager","scope_key":qmgr,"observation_family":label,"sample_id":sample,"observed_at":ts,"state":outcome.mode,"evidence_ref":outcome.evidence_ref,"error":outcome.error})
 
-            for record in family_records["qmgr-status"]:
-                observations.append(observation(
-                    entity_id=qm_id, semantic_type="mq.queue_manager", display_name=qmgr,
-                    observation_type="mq.queue_manager.status", observed_at=record.observed_at,
-                    value=record.values.get("STATUS") or "UNKNOWN", unit="state",
-                    source_id=source_id, source_host=source_host, qmgr=qmgr, sample_id=record.sample_id,
-                    evidence_ref=record.evidence_ref, collection_method="mqsc:DISPLAY QMSTATUS ALL",
-                ))
+            for r in records["qmgr-status"]:
+                observations.append(obs(qmid_id,"mq.queue_manager",qmgr,"mq.queue_manager.status",r,r.values.get("STATUS") or "UNKNOWN","state",source_id,host,"mqsc:DISPLAY QMSTATUS ALL"))
+            for r in records["listener-status"]:
+                eid=scoped_entity_id("mq.listener",qmgr,r.object_name)
+                observations.append(obs(eid,"mq.listener",r.object_name,"mq.listener.status",r,r.values.get("STATUS") or "UNKNOWN","state",source_id,host,"mqsc:DISPLAY LSSTATUS(*) ALL"))
+            for r in records["channel-status"]:
+                eid=scoped_entity_id("mq.channel",qmgr,r.object_name); discr,dims=channel_instance_dimensions(r)
+                observations.append(obs(eid,"mq.channel",r.object_name,"mq.channel.status",r,r.values.get("STATUS") or "UNKNOWN","state",source_id,host,"mqsc:DISPLAY CHSTATUS(*) ALL",discr,dims))
+                if r.values.get("MONCHL"): observations.append(obs(eid,"mq.channel",r.object_name,"mq.channel.monitoring_level",r,r.values["MONCHL"],"state",source_id,host,"mqsc:DISPLAY CHSTATUS(*) ALL",discr,dims))
+            for r in records["queue-status"]:
+                eid=scoped_entity_id("mq.queue",qmgr,r.object_name)
+                for attr,metric,unit in (("CURDEPTH","mq.queue.depth.current","messages"),("IPPROCS","mq.queue.process.input_count","processes"),("OPPROCS","mq.queue.process.output_count","processes"),("MSGAGE","mq.queue.message.age.oldest_seconds","seconds")):
+                    value=parse_int(r.values.get(attr))
+                    if value is not None: observations.append(obs(eid,"mq.queue",r.object_name,metric,r,value,unit,source_id,host,"mqsc:DISPLAY QSTATUS(*) TYPE(QUEUE) ALL"))
 
-            for record in family_records["listener-status"]:
-                eid = scoped_entity_id("mq.listener", qmgr, record.object_name)
-                observations.append(observation(
-                    entity_id=eid, semantic_type="mq.listener", display_name=record.object_name,
-                    observation_type="mq.listener.status", observed_at=record.observed_at,
-                    value=record.values.get("STATUS") or "UNKNOWN", unit="state",
-                    source_id=source_id, source_host=source_host, qmgr=qmgr, sample_id=record.sample_id,
-                    evidence_ref=record.evidence_ref, collection_method="mqsc:DISPLAY LSSTATUS(*) ALL",
-                ))
+            qseries=series_by_object(records["qmgr-status"]).get(qmgr,[])
+            if qseries and (state:=(qseries[-1].values.get("STATUS") or "UNKNOWN").upper())!="RUNNING":
+                r=qseries[-1]; findings.append(make_finding("mq.qmgr.unavailable.v1",qmid_id,"mq.queue_manager",qmgr,"critical",f"Queue manager is {state.lower()}","The latest successful queue-manager status observation is not RUNNING.","confirmed",.99,r.observed_at,r.observed_at,[ev(r,["mq.queue_manager.status"])],details={"status":state}))
 
-            for record in family_records["channel-status"]:
-                eid = scoped_entity_id("mq.channel", qmgr, record.object_name)
-                observations.append(observation(
-                    entity_id=eid, semantic_type="mq.channel", display_name=record.object_name,
-                    observation_type="mq.channel.status", observed_at=record.observed_at,
-                    value=record.values.get("STATUS") or "UNKNOWN", unit="state",
-                    source_id=source_id, source_host=source_host, qmgr=qmgr, sample_id=record.sample_id,
-                    evidence_ref=record.evidence_ref, collection_method="mqsc:DISPLAY CHSTATUS(*) ALL",
-                ))
-                if record.values.get("MONCHL"):
-                    observations.append(observation(
-                        entity_id=eid, semantic_type="mq.channel", display_name=record.object_name,
-                        observation_type="mq.channel.monitoring_level", observed_at=record.observed_at,
-                        value=record.values.get("MONCHL"), unit="state",
-                        source_id=source_id, source_host=source_host, qmgr=qmgr, sample_id=record.sample_id,
-                        evidence_ref=record.evidence_ref, collection_method="mqsc:DISPLAY CHSTATUS(*) ALL",
-                    ))
+            for name,rows in series_by_object(records["listener-status"]).items():
+                r=rows[-1]; state=(r.values.get("STATUS") or "UNKNOWN").upper()
+                if state!="RUNNING": findings.append(make_finding("mq.listener.unavailable.v1",scoped_entity_id("mq.listener",qmgr,name),"mq.listener",name,"warning",f"Listener is {state.lower()}","The latest successful listener-status observation is not RUNNING.","confirmed",.99,r.observed_at,r.observed_at,[ev(r,["mq.listener.status"])],details={"queue_manager":qmgr,"status":state}))
 
-            for record in family_records["queue-status"]:
-                eid = scoped_entity_id("mq.queue", qmgr, record.object_name)
-                for attr, observation_type, unit in (
-                    ("CURDEPTH", "mq.queue.depth.current", "messages"),
-                    ("IPPROCS", "mq.queue.process.input_count", "processes"),
-                    ("OPPROCS", "mq.queue.process.output_count", "processes"),
-                    ("MSGAGE", "mq.queue.message.age.oldest_seconds", "seconds"),
-                ):
-                    value = parse_int(record.values.get(attr))
-                    if value is None:
-                        continue
-                    observations.append(observation(
-                        entity_id=eid, semantic_type="mq.queue", display_name=record.object_name,
-                        observation_type=observation_type, observed_at=record.observed_at,
-                        value=value, unit=unit, source_id=source_id, source_host=source_host,
-                        qmgr=qmgr, sample_id=record.sample_id, evidence_ref=record.evidence_ref,
-                        collection_method="mqsc:DISPLAY QSTATUS(*) TYPE(QUEUE) ALL",
-                    ))
+            for name,rows in series_by_object(records["channel-status"]).items():
+                latest_at=max(r.observed_at for r in rows); latest=[r for r in rows if r.observed_at==latest_at]
+                states=sorted({(r.values.get("STATUS") or "UNKNOWN").upper() for r in latest}); abnormal=[r for r in latest if (r.values.get("STATUS") or "UNKNOWN").upper()!="RUNNING"]
+                if abnormal:
+                    mixed=len(abnormal)!=len(latest); summary="Some observed channel instances are not running" if mixed else f"Observed channel state is {states[0].lower()}"
+                    findings.append(make_finding("mq.channel.abnormal.v1",scoped_entity_id("mq.channel",qmgr,name),"mq.channel",name,"warning",summary,"One or more channel instances in the latest successful status sample are not RUNNING. Impact is not asserted without route/workload evidence.","confirmed",.98,latest_at,latest_at,[ev(r,["mq.channel.status"]) for r in abnormal],details={"queue_manager":qmgr,"statuses":states,"instance_count":len(latest),"abnormal_instance_count":len(abnormal),"impact":"not_established"}))
 
-            qm_series = series_by_object(family_records["qmgr-status"]).get(qmgr, [])
-            if qm_series:
-                last = qm_series[-1]
-                state = (last.values.get("STATUS") or "UNKNOWN").upper()
-                if state not in NORMAL_QMGR_STATES:
-                    findings.append(finding(
-                        rule_id="mq.qmgr.unavailable.v1", entity_id=qm_id,
-                        semantic_type="mq.queue_manager", display_name=qmgr, severity="critical",
-                        summary=f"Queue manager is {state.lower()}",
-                        diagnosis="The latest successful queue-manager status observation is not RUNNING.",
-                        confidence="confirmed", confidence_score=0.99,
-                        first_seen=last.observed_at, last_seen=last.observed_at,
-                        evidence=[evidence_ref(last, ["mq.queue_manager.status"])],
-                        details={"status": state},
-                    ))
-
-            for name, items in series_by_object(family_records["listener-status"]).items():
-                last = items[-1]
-                state = (last.values.get("STATUS") or "UNKNOWN").upper()
-                if state not in NORMAL_LISTENER_STATES:
-                    eid = scoped_entity_id("mq.listener", qmgr, name)
-                    findings.append(finding(
-                        rule_id="mq.listener.unavailable.v1", entity_id=eid,
-                        semantic_type="mq.listener", display_name=name, severity="warning",
-                        summary=f"Listener is {state.lower()}",
-                        diagnosis="The latest successful listener-status observation is not RUNNING.",
-                        confidence="confirmed", confidence_score=0.99,
-                        first_seen=last.observed_at, last_seen=last.observed_at,
-                        evidence=[evidence_ref(last, ["mq.listener.status"])],
-                        details={"queue_manager": qmgr, "status": state},
-                    ))
-
-            for name, items in series_by_object(family_records["channel-status"]).items():
-                last = items[-1]
-                state = (last.values.get("STATUS") or "UNKNOWN").upper()
-                if state not in NORMAL_CHANNEL_STATES:
-                    eid = scoped_entity_id("mq.channel", qmgr, name)
-                    findings.append(finding(
-                        rule_id="mq.channel.abnormal.v1", entity_id=eid,
-                        semantic_type="mq.channel", display_name=name, severity="warning",
-                        summary=f"Observed channel state is {state.lower()}",
-                        diagnosis="An observed channel instance is present in the latest successful status sample but is not RUNNING. Impact is not asserted without route/workload evidence.",
-                        confidence="confirmed", confidence_score=0.98,
-                        first_seen=last.observed_at, last_seen=last.observed_at,
-                        evidence=[evidence_ref(last, ["mq.channel.status"])],
-                        details={"queue_manager": qmgr, "status": state, "impact": "not_established"},
-                    ))
-
-            for name, items in series_by_object(family_records["queue-status"]).items():
-                if is_system_queue(name):
-                    continue
-                backlog = queue_backlog_increasing(items)
-                no_input = all_zero_input_processes(items)
-                producer_present = any_output_process(items)
-                aging = queue_oldest_message_aging(items)
-                eid = scoped_entity_id("mq.queue", qmgr, name)
-                first, last = items[0], items[-1]
-                depths = [parse_int(item.values.get("CURDEPTH")) for item in items]
-                ages = [parse_int(item.values.get("MSGAGE")) for item in items]
-
+            for name,rows in series_by_object(records["queue-status"]).items():
+                if is_system_queue(name): continue
+                backlog=queue_backlog_increasing(rows); no_input=all_zero_input_processes(rows); producer=any_output_process(rows); aging=queue_oldest_message_aging(rows)
+                eid=scoped_entity_id("mq.queue",qmgr,name); first,last=rows[0],rows[-1]; depths=[parse_int(r.values.get("CURDEPTH")) for r in rows]; ages=[parse_int(r.values.get("MSGAGE")) for r in rows]
                 if backlog and no_input:
-                    findings.append(finding(
-                        rule_id="mq.queue.backlog_no_input_process.v1", entity_id=eid,
-                        semantic_type="mq.queue", display_name=name, severity="warning",
-                        summary="Backlog increasing with no input process observed",
-                        diagnosis=(
-                            "Queue depth increased across the sampled window while every successful queue-status sample reported IPPROCS=0. "
-                            + ("An output process was observed, strengthening evidence that work is arriving. " if producer_present else "")
-                            + "This does not by itself prove an application outage."
-                        ),
-                        confidence="probable", confidence_score=0.92 if producer_present else 0.86,
-                        first_seen=first.observed_at, last_seen=last.observed_at,
-                        evidence=[evidence_ref(item, ["mq.queue.depth.current", "mq.queue.process.input_count", "mq.queue.process.output_count"]) for item in items],
-                        details={
-                            "queue_manager": qmgr,
-                            "depth_series": depths,
-                            "input_processes_all_zero": True,
-                            "output_process_observed": producer_present,
-                            "policy_scope": "non_system_queue_generic_v1",
-                            "impact": "not_established",
-                        },
-                    ))
+                    diag="Queue depth increased across the sampled window while every successful queue-status sample reported IPPROCS=0. "+("An output process was observed, strengthening evidence that work is arriving. " if producer else "")+"This does not by itself prove an application outage."
+                    findings.append(make_finding("mq.queue.backlog_no_input_process.v1",eid,"mq.queue",name,"warning","Backlog increasing with no input process observed",diag,"probable",.92 if producer else .86,first.observed_at,last.observed_at,[ev(r,["mq.queue.depth.current","mq.queue.process.input_count","mq.queue.process.output_count"]) for r in rows],details={"queue_manager":qmgr,"depth_series":depths,"input_processes_all_zero":True,"output_process_observed":producer,"policy_scope":"non_system_queue_generic_v1","impact":"not_established"}))
                 elif backlog:
-                    findings.append(finding(
-                        rule_id="mq.queue.backlog_increasing.v1", entity_id=eid,
-                        semantic_type="mq.queue", display_name=name, severity="warning",
-                        summary="Queue backlog increasing across observations",
-                        diagnosis="Queue depth shows a sustained positive trend across the sampled window. No business threshold or outage cause is inferred.",
-                        confidence="probable", confidence_score=0.84,
-                        first_seen=first.observed_at, last_seen=last.observed_at,
-                        evidence=[evidence_ref(item, ["mq.queue.depth.current"]) for item in items],
-                        details={"queue_manager": qmgr, "depth_series": depths, "policy_scope": "non_system_queue_generic_v1", "impact": "not_established"},
-                    ))
-
+                    findings.append(make_finding("mq.queue.backlog_increasing.v1",eid,"mq.queue",name,"warning","Queue backlog increasing across observations","Queue depth shows a sustained positive trend across the sampled window. No business threshold or outage cause is inferred.","probable",.84,first.observed_at,last.observed_at,[ev(r,["mq.queue.depth.current"]) for r in rows],details={"queue_manager":qmgr,"depth_series":depths,"policy_scope":"non_system_queue_generic_v1","impact":"not_established"}))
                 if aging:
-                    findings.append(finding(
-                        rule_id="mq.queue.oldest_message_aging.v1", entity_id=eid,
-                        semantic_type="mq.queue", display_name=name, severity="warning",
-                        summary="Oldest queued message is aging across observations",
-                        diagnosis="The oldest-message age increased with wall time while the queue remained non-empty. This is persistence evidence, not a business-SLA breach claim.",
-                        confidence="probable", confidence_score=0.86,
-                        first_seen=first.observed_at, last_seen=last.observed_at,
-                        evidence=[evidence_ref(item, ["mq.queue.message.age.oldest_seconds", "mq.queue.depth.current"]) for item in items],
-                        details={"queue_manager": qmgr, "message_age_series_seconds": ages, "depth_series": depths, "policy_scope": "non_system_queue_generic_v1", "sla_breach": "not_asserted"},
-                    ))
+                    findings.append(make_finding("mq.queue.oldest_message_aging.v1",eid,"mq.queue",name,"warning","Oldest queued message is aging across observations","The oldest-message age increased with wall time while the queue remained non-empty. This is persistence evidence, not a business-SLA breach claim.","probable",.86,first.observed_at,last.observed_at,[ev(r,["mq.queue.message.age.oldest_seconds","mq.queue.depth.current"]) for r in rows],details={"queue_manager":qmgr,"message_age_series_seconds":ages,"depth_series":depths,"policy_scope":"non_system_queue_generic_v1","sla_breach":"not_asserted"}))
 
-            monchl = str(cfg.get("MONCHL") or "").upper()
-            if monchl == "OFF":
-                config_ref = f"qmgr/{qdir}/config/qmgr.out"
-                findings.append(finding(
-                    rule_id="mq.observability.channel_timing_unavailable.v1", entity_id=qm_id,
-                    semantic_type="mq.queue_manager", display_name=qmgr, severity="info",
-                    summary="Channel performance timing is not observable",
-                    diagnosis="Queue-manager configuration reports MONCHL(OFF). Channel state remains observable, but NETTIME/XQTIME-style timing diagnosis is unavailable from this evidence source.",
-                    confidence="confirmed", confidence_score=0.99,
-                    first_seen=completed_at, last_seen=completed_at,
-                    evidence=[{
-                        "sample_id": "configuration",
-                        "observed_at": completed_at,
-                        "evidence_ref": config_ref,
-                        "observation_types": ["mq.channel.monitoring_coverage"],
-                    }],
-                    coverage_state="limited",
-                    details={"queue_manager": qmgr, "MONCHL": "OFF", "health_implication": "none"},
-                ))
+            if str(cfg.get("MONCHL") or "").upper()=="OFF":
+                findings.append(make_finding("mq.observability.channel_timing_unavailable.v1",qmid_id,"mq.queue_manager",qmgr,"info","Channel performance timing is not observable","Queue-manager configuration reports MONCHL(OFF). Channel state remains observable, but detailed channel timing diagnosis is unavailable from this evidence source.","confirmed",.99,completed,completed,[{"sample_id":"configuration","observed_at":completed,"evidence_ref":f"qmgr/{qdir}/config/qmgr.out","observation_types":["mq.channel.monitoring_coverage"]}],"limited",{"queue_manager":qmgr,"MONCHL":"OFF","health_implication":"none"}))
 
-            for family, outcomes in family_outcomes.items():
-                bad = [(sample, ts, outcome) for sample, ts, outcome in outcomes if outcome.mode in {"failed", "not_collected"}]
-                good = [item for item in outcomes if item[2].mode == "point_in_time"]
-                if not bad:
-                    continue
-                _, latest_ts, _ = bad[-1]
-                coverage_state = "partial" if good else "failed"
-                findings.append(finding(
-                    rule_id=f"mq.observability.collection_gap.{family}.v1", entity_id=qm_id,
-                    semantic_type="mq.queue_manager", display_name=qmgr, severity="warning",
-                    summary=f"{family.replace('-', ' ').title()} evidence is incomplete",
-                    diagnosis="One or more required runtime collection attempts failed or were not collected. Health conclusions that depend on this observation family must be treated as incomplete.",
-                    confidence="confirmed", confidence_score=0.99,
-                    first_seen=bad[0][1], last_seen=latest_ts,
-                    evidence=[{
-                        "sample_id": sample,
-                        "observed_at": ts,
-                        "evidence_ref": outcome.evidence_ref,
-                        "observation_types": [f"coverage.{family}"],
-                        "error": outcome.error,
-                    } for sample, ts, outcome in bad],
-                    coverage_state=coverage_state,
-                    details={"queue_manager": qmgr, "observation_family": family, "successful_samples": len(good), "failed_or_missing_samples": len(bad)},
-                ))
+            for family,rows in outcomes.items():
+                bad=[x for x in rows if x[2].mode in {"failed","not_collected"}]; good=[x for x in rows if x[2].mode=="point_in_time"]
+                if bad:
+                    evidence=[{"sample_id":s,"observed_at":ts,"evidence_ref":o.evidence_ref,"observation_types":[f"coverage.{family}"],"error":o.error} for s,ts,o in bad]
+                    findings.append(make_finding(f"mq.observability.collection_gap.{family}.v1",qmid_id,"mq.queue_manager",qmgr,"warning",f"{family.replace('-',' ').title()} evidence is incomplete","One or more required runtime collection attempts failed or were not collected. Health conclusions that depend on this observation family must be treated as incomplete.","confirmed",.99,bad[0][1],bad[-1][1],evidence,"partial" if good else "failed",{"queue_manager":qmgr,"observation_family":family,"successful_samples":len(good),"failed_or_missing_samples":len(bad)}))
+            qms.append({"queue_manager":qmgr,"entity_id":qmid_id,"qmid":qmid,"runtime_samples":len(samples)})
 
-            qmgr_summaries.append({
-                "queue_manager": qmgr,
-                "entity_id": qm_id,
-                "qmid": qmid,
-                "runtime_samples": len(samples),
-            })
-
-        findings.sort(key=lambda item: (
-            {"critical": 0, "warning": 1, "info": 2}.get(item["severity"], 9),
-            item["semantic_type"], item["display_name"], item["rule_id"],
-        ))
-        observations.sort(key=lambda item: (item["entity_id"], item["observation_type"], item["observed_at"]))
-        coverage.sort(key=lambda item: (item["scope_key"], item["observation_family"], item["observed_at"]))
-        counts = {
-            "critical": sum(1 for item in findings if item["severity"] == "critical"),
-            "warning": sum(1 for item in findings if item["severity"] == "warning"),
-            "info": sum(1 for item in findings if item["severity"] == "info"),
-            "total": len(findings),
-        }
-        return {
-            "schema_version": SCHEMA_VERSION,
-            "evaluation": {
-                "evaluator": "evaluate_findings_v1.py",
-                "evaluator_version": EVALUATOR_VERSION,
-                "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                "source_archive": PurePosixPath(filename).name,
-                "source_archive_sha256": sha256_file(filename),
-                "source_id": source_id,
-                "source_host": source_host,
-                "collector_version": mf.get("collector_version"),
-                "sample_count_declared": parse_int(mf.get("samples")),
-                "sample_interval_seconds_declared": parse_int(mf.get("interval_seconds")),
-                "policy": {
-                    "system_queue_generic_rules": "excluded",
-                    "absolute_queue_depth_thresholds": "not_used",
-                    "business_sla_thresholds": "not_invented",
-                    "external_monitoring_dependencies": "none",
-                },
-            },
-            "queue_managers": qmgr_summaries,
-            "coverage": coverage,
-            "operational_observations": observations,
-            "findings": findings,
-            "summary": counts,
-        }
-    finally:
-        archive.close()
+        findings.sort(key=lambda f:({"critical":0,"warning":1,"info":2}.get(f["severity"],9),f["semantic_type"],f["display_name"],f["rule_id"]))
+        observations.sort(key=lambda o:(o["entity_id"],o["observation_type"],o["observed_at"],o["observation_id"]))
+        coverage.sort(key=lambda c:(c["scope_key"],c["observation_family"],c["observed_at"]))
+        summary={s:sum(f["severity"]==s for f in findings) for s in ("critical","warning","info")}; summary["total"]=len(findings)
+        return {"schema_version":SCHEMA_VERSION,"evaluation":{"evaluator":"evaluate_findings_v1.py","evaluator_version":EVALUATOR_VERSION,"evaluated_at":datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),"source_archive":PurePosixPath(filename).name,"source_archive_sha256":sha256_file(filename),"source_id":source_id,"source_host":host,"collector_version":mf.get("collector_version"),"sample_count_declared":parse_int(mf.get("samples")),"sample_interval_seconds_declared":parse_int(mf.get("interval_seconds")),"policy":{"system_queue_generic_rules":"excluded","absolute_queue_depth_thresholds":"not_used","business_sla_thresholds":"not_invented","external_monitoring_dependencies":"none"}},"queue_managers":qms,"coverage":coverage,"operational_observations":observations,"findings":findings,"summary":summary}
+    finally: a.close()
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate OSI Phase 2 Findings v1 from an IBM MQ raw collector archive")
-    parser.add_argument("archive", help="mq-topology-*.tar.gz raw collector evidence")
-    parser.add_argument("-o", "--output", default="osi-findings-v1.json", help="output JSON path")
-    args = parser.parse_args()
-    result = evaluate_archive(args.archive)
-    with open(args.output, "w", encoding="utf-8") as fh:
-        json.dump(result, fh, indent=2, sort_keys=False)
-        fh.write("\n")
-    print(json.dumps({
-        "output": args.output,
-        "schema_version": result["schema_version"],
-        "observations": len(result["operational_observations"]),
-        "coverage_records": len(result["coverage"]),
-        "findings": result["summary"],
-    }, indent=2))
+def main():
+    p=argparse.ArgumentParser(description="Evaluate OSI Phase 2 Findings v1 from an IBM MQ raw collector archive")
+    p.add_argument("archive"); p.add_argument("-o","--output",default="osi-findings-v1.json"); args=p.parse_args()
+    result=evaluate_archive(args.archive)
+    with open(args.output,"w",encoding="utf-8") as fh: json.dump(result,fh,indent=2); fh.write("\n")
+    print(json.dumps({"output":args.output,"schema_version":result["schema_version"],"observations":len(result["operational_observations"]),"coverage_records":len(result["coverage"]),"findings":result["summary"]},indent=2))
 
 
-if __name__ == "__main__":
-    main()
+if __name__=="__main__": main()
