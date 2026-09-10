@@ -1,0 +1,245 @@
+name: Operational findings persistence check
+
+on:
+  pull_request:
+    paths:
+      - "src/bootstrap.ts"
+      - "src/import-auth.ts"
+      - "src/operational-findings.ts"
+      - "migrations/**"
+      - "scripts/publish-findings-evaluation.mjs"
+      - "docs/phase-2b-findings-persistence-api.md"
+      - ".github/workflows/operational-findings-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/bootstrap.ts"
+      - "src/import-auth.ts"
+      - "src/operational-findings.ts"
+      - "migrations/**"
+      - "scripts/publish-findings-evaluation.mjs"
+      - "docs/phase-2b-findings-persistence-api.md"
+      - ".github/workflows/operational-findings-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check Worker
+        run: npm run check
+
+      - name: Check publisher syntax
+        run: node --check scripts/publish-findings-evaluation.mjs
+
+      - name: Apply local D1 migrations
+        run: npm run db:migrate:local
+
+      - name: Start local Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler dev --local --port 8787 --var ADMIN_IMPORT_TOKEN:ci-token > /tmp/wrangler-operational.log 2>&1 &
+          echo $! > /tmp/wrangler-operational.pid
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8787/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/wrangler-operational.log
+          exit 1
+
+      - name: Exercise staged import, current reads, and lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='http://127.0.0.1:8787'
+          auth='Authorization: Bearer ci-token'
+          entity='cent_aaaaaaaaaaaaaaaaaaaaaaaa'
+          finding='find_bbbbbbbbbbbbbbbbbbbbbbbb'
+
+          cat > /tmp/eval1.json <<'JSON'
+          {
+            "schema_version":"osi.findings.evaluation/v1",
+            "source":{"id":"host-a.example","host":"host-a"},
+            "environment":"ci",
+            "evaluator":"evaluate_findings_v1.py",
+            "evaluator_version":"1.0.0",
+            "evaluated_at":"2026-09-10T10:05:00Z",
+            "artifact":{"filename":"mq-topology-host-a.tar.gz","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+            "result_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "counts":{"observations":1,"coverage":1,"findings":1},
+            "metadata":{"fixture":"initial"}
+          }
+          JSON
+
+          unauth_code="$(curl --silent --output /tmp/unauth.json --write-out '%{http_code}' \
+            -H 'Content-Type: application/json' --data-binary @/tmp/eval1.json \
+            "$base/api/v2/operations/evaluations")"
+          test "$unauth_code" = "401"
+
+          created="$(curl --fail --silent -H "$auth" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/eval1.json "$base/api/v2/operations/evaluations")"
+          rev1="$(printf '%s' "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["evaluation_revision_id"])')"
+          test -n "$rev1"
+
+          premature="$(curl --silent --output /tmp/premature.json --write-out '%{http_code}' \
+            -H "$auth" -X POST "$base/api/v2/operations/evaluations/$rev1/activate")"
+          test "$premature" = "409"
+          grep -Fq 'counts do not match' /tmp/premature.json
+
+          cat > /tmp/observations.json <<JSON
+          {"start":0,"items":[{
+            "observation_id":"obs_ci_queue_depth_1",
+            "entity_id":"$entity",
+            "semantic_type":"mq.queue",
+            "display_name":"APP.OUT",
+            "observation_type":"mq.queue.depth.current",
+            "observed_at":"2026-09-10T10:04:00Z",
+            "value":14,
+            "unit":"messages",
+            "source":{
+              "source_id":"host-a.example","source_host":"host-a","queue_manager":"QM1",
+              "collection_method":"mqsc:DISPLAY QSTATUS(*) TYPE(QUEUE) ALL","evidence_class":"observed",
+              "evidence_ref":"qmgr/001_QM1/runtime/sample_003/queue-status.out","sample_id":"sample_003"
+            },
+            "quality":{"coverage":"point_in_time","freshness":"sampled"}
+          }]}
+          JSON
+          curl --fail --silent -H "$auth" -H 'Content-Type: application/json' --data-binary @/tmp/observations.json \
+            "$base/api/v2/operations/evaluations/$rev1/observations" >/dev/null
+
+          cat > /tmp/coverage.json <<'JSON'
+          {"start":0,"items":[{
+            "scope_type":"queue_manager","scope_key":"QM1","observation_family":"queue-status",
+            "sample_id":"sample_003","observed_at":"2026-09-10T10:04:00Z","state":"point_in_time",
+            "evidence_ref":"qmgr/001_QM1/runtime/sample_003/queue-status.out","error":null
+          }]}
+          JSON
+          curl --fail --silent -H "$auth" -H 'Content-Type: application/json' --data-binary @/tmp/coverage.json \
+            "$base/api/v2/operations/evaluations/$rev1/coverage" >/dev/null
+
+          cat > /tmp/findings.json <<JSON
+          {"start":0,"items":[{
+            "finding_id":"$finding","rule_id":"mq.queue.backlog_no_input_process.v1",
+            "entity_id":"$entity","semantic_type":"mq.queue","display_name":"APP.OUT",
+            "severity":"warning","status":"OPEN","summary":"Backlog increasing with no input process observed",
+            "diagnosis":"Queue depth increased across the sampled window while no input process was observed.",
+            "confidence":{"level":"probable","score":0.92},
+            "first_seen":"2026-09-10T10:00:00Z","last_seen":"2026-09-10T10:04:00Z",
+            "coverage_state":"sufficient",
+            "evidence":[{"sample_id":"sample_003","observed_at":"2026-09-10T10:04:00Z","evidence_ref":"qmgr/001_QM1/runtime/sample_003/queue-status.out","observation_types":["mq.queue.depth.current","mq.queue.process.input_count"]}],
+            "related_entities":[],"details":{"queue_manager":"QM1","impact":"not_established"}
+          }]}
+          JSON
+          curl --fail --silent -H "$auth" -H 'Content-Type: application/json' --data-binary @/tmp/findings.json \
+            "$base/api/v2/operations/evaluations/$rev1/findings" >/dev/null
+
+          activated="$(curl --fail --silent -H "$auth" -X POST "$base/api/v2/operations/evaluations/$rev1/activate")"
+          printf '%s\n' "$activated" | grep -Fq '"status": "ACTIVE"'
+
+          status_json="$(curl --fail --silent "$base/api/v2/operations/status")"
+          printf '%s\n' "$status_json" | grep -Fq '"database_ready": true'
+          printf '%s\n' "$status_json" | grep -Fq '"current_sources": 1'
+          printf '%s\n' "$status_json" | grep -Fq '"current_findings": 1'
+          printf '%s\n' "$status_json" | grep -Fq '"current_observations": 1'
+
+          current="$(curl --fail --silent "$base/api/v2/findings/current?severity=warning&entity_id=$entity")"
+          printf '%s\n' "$current" | grep -Fq '"total": 1'
+          printf '%s\n' "$current" | grep -Fq '"status": "OPEN"'
+          printf '%s\n' "$current" | grep -Fq 'qmgr/001_QM1/runtime/sample_003/queue-status.out'
+
+          observations="$(curl --fail --silent "$base/api/v2/operations/current/observations?entity_id=$entity&observation_type=mq.queue.depth.current")"
+          printf '%s\n' "$observations" | grep -Fq '"total": 1'
+          printf '%s\n' "$observations" | grep -Fq '"value": 14'
+
+          coverage="$(curl --fail --silent "$base/api/v2/operations/current/coverage?scope_key=QM1&observation_family=queue-status")"
+          printf '%s\n' "$coverage" | grep -Fq '"total": 1'
+          printf '%s\n' "$coverage" | grep -Fq '"state": "point_in_time"'
+
+          ack="$(curl --fail --silent -H "$auth" -H 'Content-Type: application/json' \
+            --data '{"status":"ACKNOWLEDGED","note":"CI investigation"}' \
+            "$base/api/v2/findings/$finding/lifecycle")"
+          printf '%s\n' "$ack" | grep -Fq '"status": "ACKNOWLEDGED"'
+          curl --fail --silent "$base/api/v2/findings/current?status=ACKNOWLEDGED" | grep -Fq "$finding"
+
+          detail="$(curl --fail --silent "$base/api/v2/findings/current/$finding")"
+          printf '%s\n' "$detail" | grep -Fq '"transition_source": "operator_api"'
+          printf '%s\n' "$detail" | grep -Fq 'CI investigation'
+
+      - name: Preserve acknowledgement, resolve, and reopen only on newer evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='http://127.0.0.1:8787'
+          auth='Authorization: Bearer ci-token'
+          entity='cent_aaaaaaaaaaaaaaaaaaaaaaaa'
+          finding='find_bbbbbbbbbbbbbbbbbbbbbbbb'
+
+          create_eval() {
+            local evaluated_at="$1" archive_sha="$2" result_sha="$3" fixture="$4"
+            cat > /tmp/eval.json <<JSON
+          {"schema_version":"osi.findings.evaluation/v1","source":{"id":"host-a.example","host":"host-a"},"environment":"ci","evaluator":"evaluate_findings_v1.py","evaluator_version":"1.0.0","evaluated_at":"$evaluated_at","artifact":{"filename":"mq-topology-host-a-$fixture.tar.gz","sha256":"$archive_sha"},"result_sha256":"$result_sha","counts":{"observations":0,"coverage":0,"findings":1},"metadata":{"fixture":"$fixture"}}
+          JSON
+            local response
+            response="$(curl --fail --silent -H "$auth" -H 'Content-Type: application/json' --data-binary @/tmp/eval.json "$base/api/v2/operations/evaluations")"
+            printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["evaluation_revision_id"])'
+          }
+
+          upload_finding() {
+            local revision="$1" first="$2" last="$3"
+            cat > /tmp/finding-next.json <<JSON
+          {"start":0,"items":[{"finding_id":"$finding","rule_id":"mq.queue.backlog_no_input_process.v1","entity_id":"$entity","semantic_type":"mq.queue","display_name":"APP.OUT","severity":"warning","status":"OPEN","summary":"Backlog increasing with no input process observed","diagnosis":"New evaluation still observes the same conservative condition.","confidence":{"level":"probable","score":0.92},"first_seen":"$first","last_seen":"$last","coverage_state":"sufficient","evidence":[{"sample_id":"sample_new","observed_at":"$last","evidence_ref":"qmgr/001_QM1/runtime/sample_new/queue-status.out","observation_types":["mq.queue.depth.current","mq.queue.process.input_count"]}],"related_entities":[],"details":{"queue_manager":"QM1","impact":"not_established"}}]}
+          JSON
+            curl --fail --silent -H "$auth" -H 'Content-Type: application/json' --data-binary @/tmp/finding-next.json \
+              "$base/api/v2/operations/evaluations/$revision/findings" >/dev/null
+          }
+
+          rev2="$(create_eval '2099-01-01T00:05:00Z' 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' 'newer-1')"
+          upload_finding "$rev2" '2026-09-10T10:00:00Z' '2099-01-01T00:04:00Z'
+          curl --fail --silent -H "$auth" -X POST "$base/api/v2/operations/evaluations/$rev2/activate" >/dev/null
+
+          acknowledged="$(curl --fail --silent "$base/api/v2/findings/current/$finding")"
+          printf '%s\n' "$acknowledged" | grep -Fq '"status": "ACKNOWLEDGED"'
+          printf '%s\n' "$acknowledged" | grep -Fq '"last_seen": "2099-01-01T00:04:00.000Z"'
+
+          resolved="$(curl --fail --silent -H "$auth" -H 'Content-Type: application/json' \
+            --data '{"status":"RESOLVED","note":"CI resolution"}' "$base/api/v2/findings/$finding/lifecycle")"
+          printf '%s\n' "$resolved" | grep -Fq '"status": "RESOLVED"'
+          curl --fail --silent "$base/api/v2/findings/current?status=RESOLVED" | grep -Fq "$finding"
+
+          rev3="$(create_eval '2099-02-01T00:05:00Z' 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff' 'newer-2')"
+          upload_finding "$rev3" '2099-02-01T00:00:00Z' '2099-02-01T00:04:00Z'
+          curl --fail --silent -H "$auth" -X POST "$base/api/v2/operations/evaluations/$rev3/activate" >/dev/null
+
+          reopened="$(curl --fail --silent "$base/api/v2/findings/current/$finding")"
+          printf '%s\n' "$reopened" | grep -Fq '"status": "OPEN"'
+          printf '%s\n' "$reopened" | grep -Fq 'Reopened by newer evaluation evidence'
+          printf '%s\n' "$reopened" | grep -Fq '"transition_source": "evaluation_activation"'
+
+          stale="$(create_eval '2098-01-01T00:05:00Z' '1111111111111111111111111111111111111111111111111111111111111111' '2222222222222222222222222222222222222222222222222222222222222222' 'stale')"
+          upload_finding "$stale" '2098-01-01T00:00:00Z' '2098-01-01T00:04:00Z'
+          stale_code="$(curl --silent --output /tmp/stale.json --write-out '%{http_code}' \
+            -H "$auth" -X POST "$base/api/v2/operations/evaluations/$stale/activate")"
+          test "$stale_code" = "409"
+          grep -Fq 'newer or equal operational evaluation' /tmp/stale.json
+
+          final="$(curl --fail --silent "$base/api/v2/findings/current/$finding")"
+          printf '%s\n' "$final" | grep -Fq '2099-02-01T00:05:00.000Z'
+
+      - name: Stop local Worker
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f /tmp/wrangler-operational.pid ]]; then kill "$(cat /tmp/wrangler-operational.pid)" || true; fi
+          tail -150 /tmp/wrangler-operational.log || true
