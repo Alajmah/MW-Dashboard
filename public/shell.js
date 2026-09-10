@@ -5,8 +5,9 @@ import "/explore-investigation.js?v=20260910-4";
 import "/explore-boundary.js?v=20260910-4";
 import "/explore-pivot.js?v=20260910-4";
 import "/workstation-ui.js?v=20260910-1";
+import "/wave1-shell-cleanup.js?v=20260910-1";
 
-const UI_ASSET_REVISION = "20260910-5";
+const UI_ASSET_REVISION = "20260910-6";
 
 const shellCopy = {
   overview: ["Overview", "Evidence-backed operational attention across the current canonical middleware estate."],
@@ -16,7 +17,7 @@ const shellCopy = {
   middleware: ["Middleware", "Legacy snapshot view retained while middleware-specific canonical projections are migrated."],
   applications: ["Applications", "Legacy snapshot view retained while application-specific canonical projections are migrated."],
   routes: ["Routes", "Trace canonical delivery semantics, runtime queue access and MQ transport while keeping access evidence distinct from actual PUT/GET activity."],
-  snapshots: ["Collection", "Discovery and collection history retained for traceability while canonical revision history evolves."],
+  snapshots: ["Collection", "Evidence sources, imports and retained canonical revisions for traceability."],
   administration: ["Administration", "Manual topology ingestion and activation."],
 };
 
