@@ -4,7 +4,18 @@
   "title": "OSI OperationalObservation v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["observation_id", "entity_id", "semantic_type", "display_name", "observation_type", "observed_at", "value", "unit", "source", "quality"],
+  "required": [
+    "observation_id",
+    "entity_id",
+    "semantic_type",
+    "display_name",
+    "observation_type",
+    "observed_at",
+    "value",
+    "unit",
+    "source",
+    "quality"
+  ],
   "properties": {
     "observation_id": {"type": "string", "minLength": 1},
     "entity_id": {"type": "string", "pattern": "^cent_[0-9a-f]{24}$"},
@@ -36,6 +47,10 @@
         "coverage": {"enum": ["complete", "point_in_time", "partial", "failed", "not_collected"]},
         "freshness": {"enum": ["sampled", "stale", "unknown"]}
       }
+    },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": {"type": ["string", "number", "integer", "boolean", "null"]}
     }
   }
 }
