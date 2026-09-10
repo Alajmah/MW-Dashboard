@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "public/explore-investigation.js"
+      - "public/explore-boundary.js"
       - "public/explore-investigation.css"
       - "public/shell.js"
       - ".github/workflows/explore-investigation-check.yml"
@@ -12,6 +13,7 @@ on:
       - main
     paths:
       - "public/explore-investigation.js"
+      - "public/explore-boundary.js"
       - "public/explore-investigation.css"
       - "public/shell.js"
       - ".github/workflows/explore-investigation-check.yml"
@@ -27,7 +29,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: JavaScript syntax
-        run: node --check public/explore-investigation.js && node --check public/shell.js
+        run: node --check public/explore-investigation.js && node --check public/explore-boundary.js && node --check public/shell.js
 
       - name: Investigation UX contract
         shell: python
@@ -35,12 +37,14 @@ jobs:
           from pathlib import Path
 
           js = Path("public/explore-investigation.js").read_text()
+          boundary = Path("public/explore-boundary.js").read_text()
           css = Path("public/explore-investigation.css").read_text()
           shell = Path("public/shell.js").read_text()
-          combined = js + "\n" + css + "\n" + shell
+          combined = js + "\n" + boundary + "\n" + css + "\n" + shell
 
           required = [
-              'import "/explore-investigation.js?v=20260910-2"',
+              'import "/explore-investigation.js?v=20260910-3"',
+              'import "/explore-boundary.js?v=20260910-3"',
               'Quick semantic scopes',
               'data-explore-scope',
               'history.replaceState',
@@ -65,19 +69,26 @@ jobs:
               '.inventory-layout.explore-detail-open',
               'thead th{position:sticky',
               '.metadata-list .estate-provenance-row',
+              'restoreCanonicalExploreControls',
+              'canonicalTypeSignature',
+              'canonicalIdentitySignature',
+              'canonicalSizeSignature',
+              'resolveOpaqueRelationshipNeighbors',
+              'observer.observe(select, { childList: true, subtree: false })',
+              'osiRestoreCanonicalExploreControls',
           ]
           missing = [item for item in required if item not in combined]
           if missing:
               raise SystemExit(f"Explore investigation contract missing: {missing}")
 
-          if '/api/v1/topology/current' in js:
-              raise SystemExit("Explore investigation layer must remain canonical-only")
+          if '/api/v1/topology/current' in js or '/api/v1/topology/current' in boundary:
+              raise SystemExit("Explore investigation layers must remain canonical-only")
 
           dangerous = [
               'subtree: true, attributes: true',
               'attributes: true, subtree: true',
           ]
-          if any(item in js for item in dangerous):
+          if any(item in js or item in boundary for item in dangerous):
               raise SystemExit("Explore investigation must not observe descendant attributes")
 
           if 'observer.observe(rows, { childList: true, subtree: false })' not in js:
