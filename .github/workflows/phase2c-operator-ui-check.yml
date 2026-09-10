@@ -1,0 +1,74 @@
+name: Phase 2C operator UI check
+
+on:
+  pull_request:
+    paths:
+      - "public/operational-intelligence.js"
+      - "public/operational-intelligence.css"
+      - "public/shell.js"
+      - "docs/phase-2c-operator-attention-ui.md"
+      - ".github/workflows/phase2c-operator-ui-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/operational-intelligence.js"
+      - "public/operational-intelligence.css"
+      - "public/shell.js"
+      - "docs/phase-2c-operator-attention-ui.md"
+      - ".github/workflows/phase2c-operator-ui-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check Worker
+        run: npm run check
+
+      - name: Check browser module syntax
+        run: node --check public/operational-intelligence.js
+
+      - name: Verify shell wiring and API projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'operational-intelligence.js' public/shell.js
+          grep -Fq 'osiRefreshOperationalIntelligence' public/shell.js
+          grep -Fq '/api/v2/operations/status' public/operational-intelligence.js
+          grep -Fq '/api/v2/findings/current' public/operational-intelligence.js
+          grep -Fq '/api/v2/operations/current/observations' public/operational-intelligence.js
+          grep -Fq '/api/v2/operations/current/coverage' public/operational-intelligence.js
+          grep -Fq 'What requires attention?' public/operational-intelligence.js
+          grep -Fq 'Findings' public/operational-intelligence.js
+          grep -Fq 'Monitor' public/operational-intelligence.js
+          grep -Fq 'Evidence' public/operational-intelligence.js
+
+      - name: Guard browser evaluation boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -Eq 'CURDEPTH|IPPROCS|OPPROCS|MSGAGE|RESET QSTATS|queue_backlog_increasing|queue_oldest_message_aging' public/operational-intelligence.js
+          grep -Fq 'browser does not infer findings, thresholds, causality' public/operational-intelligence.js
+          grep -Fq 'not proof of recovery' public/operational-intelligence.js
+          grep -Fq 'Operational status is unknown' public/operational-intelligence.js
+
+      - name: Verify responsive stylesheet structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          css = Path('public/operational-intelligence.css').read_text()
+          assert css.count('{') == css.count('}'), 'unbalanced CSS braces'
+          for selector in ('.operational-attention', '.object-operational-intelligence', '.object-monitor-grid', '.object-evidence-table'):
+              assert selector in css, f'missing {selector}'
+          PY
