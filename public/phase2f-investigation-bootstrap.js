@@ -29,7 +29,7 @@ if (typeof baseOpenObjectWorkspace === "function") {
   window.osiOpenInvestigationWorkspace = window.osiOpenObjectWorkspace;
 }
 
-function scheduleWorkspaceEnhancement() {
+function scheduleWorkspaceEnhancement(delay = 180) {
   clearTimeout(enhancementTimer);
   enhancementTimer = setTimeout(async () => {
     const workspace = document.getElementById("objectWorkspace");
@@ -37,15 +37,17 @@ function scheduleWorkspaceEnhancement() {
     const entityId = new URL(window.location.href).searchParams.get("entity") || "";
     if (!entityId) return;
     try { await enhanceEntity(entityId); } catch (error) { console.warn("Phase 2F workspace observer failed", error); }
-  }, 180);
+  }, delay);
 }
 
 function observeWorkspace() {
   const workspace = document.getElementById("objectWorkspace");
   if (!workspace) { setTimeout(observeWorkspace, 180); return; }
-  new MutationObserver(scheduleWorkspaceEnhancement).observe(workspace, { attributes: true, attributeFilter: ["hidden"] });
+  new MutationObserver(() => scheduleWorkspaceEnhancement()).observe(workspace, { attributes: true, attributeFilter: ["hidden"] });
+  const name = document.getElementById("objectWorkspaceName");
+  if (name) new MutationObserver(() => scheduleWorkspaceEnhancement(0)).observe(name, { childList: true, subtree: false });
   scheduleWorkspaceEnhancement();
 }
 
-window.addEventListener("popstate", scheduleWorkspaceEnhancement);
+window.addEventListener("popstate", () => scheduleWorkspaceEnhancement(0));
 observeWorkspace();
