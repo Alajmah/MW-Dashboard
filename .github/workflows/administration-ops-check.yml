@@ -43,10 +43,9 @@ jobs:
       - name: Prevent legacy Administration importer ownership
         run: |
           grep -Fq 'import "/administration-ops.js' public/shell.js
-          if grep -E 'function legacyView\(view\).*["'"']administration["'"']' public/shell.js; then
-            echo 'Administration must not be routed through the legacy app.js importer.' >&2
-            exit 1
-          fi
+          grep -Fq 'return ["middleware", "applications", "snapshots"].includes(view);' public/shell.js
+          grep -Fq 'if (view === "administration") {' public/shell.js
+          grep -Fq 'window.osiRenderAdministrationOps?.();' public/shell.js
 
       - name: Verify credential handling boundary
         run: |
