@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mw-dashboard.local/contracts/telemetry/v1/ingest-ack.schema.json",
+  "title": "OSI Telemetry Ingest Acknowledgement v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "delivery_id", "content_sha256", "source_id", "status"],
+  "properties": {
+    "schema_version": {"const": "osi.telemetry.ingest-ack/v1"},
+    "delivery_id": {"type": "string", "pattern": "^tdel_[0-9a-f]{24}$"},
+    "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["accepted", "duplicate"]}
+  }
+}
