@@ -7,8 +7,9 @@ import "/explore-pivot.js?v=20260910-4";
 import "/workstation-ui.js?v=20260910-1";
 import "/wave1-shell-cleanup.js?v=20260910-1";
 import "/operational-intelligence.js?v=20260910-1";
+import "/administration-ops.js?v=20260911-1";
 
-const UI_ASSET_REVISION = "20260910-7";
+const UI_ASSET_REVISION = "20260911-1";
 
 const shellCopy = {
   overview: ["Overview", "Evidence-backed operational attention across the current canonical middleware estate."],
@@ -19,7 +20,7 @@ const shellCopy = {
   applications: ["Applications", "Legacy snapshot view retained while application-specific canonical projections are migrated."],
   routes: ["Routes", "Trace canonical delivery semantics, runtime queue access and MQ transport while keeping access evidence distinct from actual PUT/GET activity."],
   snapshots: ["Collection", "Evidence sources, imports and retained canonical revisions for traceability."],
-  administration: ["Administration", "Manual topology ingestion and activation."],
+  administration: ["Administration", "Protected ingestion for canonical topology sources and OSI operational evaluations."],
 };
 
 let legacyPromise = null;
@@ -37,6 +38,7 @@ function shellSetView(view) {
   window.osiRefreshWorkstationUI?.();
   window.osiProductShellRefresh?.();
   window.osiRefreshOperationalIntelligence?.();
+  if (view === "administration") window.osiRenderAdministrationOps?.();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -61,7 +63,7 @@ async function ensureCanonicalRoutes() {
 }
 
 function legacyView(view) {
-  return ["middleware", "applications", "snapshots", "administration"].includes(view);
+  return ["middleware", "applications", "snapshots"].includes(view);
 }
 
 async function navigate(view) {
@@ -85,6 +87,10 @@ async function navigate(view) {
       window.osiRefreshOperationalIntelligence?.();
       return;
     }
+    if (view === "administration") {
+      window.osiRenderAdministrationOps?.();
+      return;
+    }
     if (legacyView(view)) {
       await ensureLegacy();
       window.osiApplyCanonicalShell?.();
@@ -95,7 +101,7 @@ async function navigate(view) {
     if (message) {
       message.hidden = false;
       message.className = "global-message error";
-      const source = view === "routes" ? "Canonical route" : view === "servers" ? "Canonical server" : view === "qmgrs" ? "Canonical queue manager" : "Legacy view";
+      const source = view === "routes" ? "Canonical route" : view === "servers" ? "Canonical server" : view === "qmgrs" ? "Canonical queue manager" : view === "administration" ? "Administration" : "Legacy view";
       message.textContent = `${source} failed to load: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
@@ -114,7 +120,7 @@ document.getElementById("jumpInventory")?.addEventListener("click", () => naviga
 // module has been loaded during the same browser session.
 document.addEventListener("click", (event) => {
   const view = event.target.closest("[data-view]")?.dataset.view || event.target.closest("[data-go]")?.dataset.go;
-  if (["overview", "inventory", "routes", "servers", "qmgrs"].includes(view)) {
+  if (["overview", "inventory", "routes", "servers", "qmgrs", "administration"].includes(view)) {
     shellSetView(view);
     if (view === "servers") setTimeout(() => window.osiRenderCanonicalServers?.(), 0);
     if (view === "qmgrs") setTimeout(() => window.osiRenderQueueManagers?.(), 0);
@@ -130,6 +136,7 @@ document.addEventListener("click", (event) => {
       setTimeout(() => window.osiRefreshOperationalIntelligence?.(), 200);
     }
     if (view === "routes") setTimeout(() => window.osiRefreshWorkstationUI?.(), 120);
+    if (view === "administration") setTimeout(() => window.osiRenderAdministrationOps?.(), 0);
   }
 });
 
