@@ -91,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          entity="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/estate/entities/cent_111111111111111111111111?relation_limit=20')"
+          entity="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/estate/current/entities/cent_111111111111111111111111?relation_limit=20')"
           printf '%s\n' "$entity" > /tmp/phase2i-entity.json
 
           observations="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/operations/current/observations?entity_id=cent_111111111111111111111111&limit=100')"
