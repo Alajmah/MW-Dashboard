@@ -9,9 +9,10 @@ import "/wave1-shell-cleanup.js?v=20260910-1";
 import "/operational-intelligence.js?v=20260910-1";
 import "/phase2d-evidence-semantics.js?v=20260911-1";
 import "/phase2e-triage-compression.js?v=20260911-1";
+import "/phase2f-investigation-bootstrap.js?v=20260911-1";
 import "/administration-ops.js?v=20260911-1";
 
-const UI_ASSET_REVISION = "20260911-3";
+const UI_ASSET_REVISION = "20260911-4";
 
 const shellCopy = {
   overview: ["Overview", "Evidence-backed operational attention across the current canonical middleware estate."],
