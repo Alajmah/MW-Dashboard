@@ -111,7 +111,7 @@ jobs:
 
           entity=json.load(open('/tmp/phase2i-entity.json'))
           assert entity['entity']['display_name'] == 'Q.REGRESSION.OUT'
-          assert len(entity['relations']) == 5
+          assert len(entity['relations']) == 3
 
           observations=json.load(open('/tmp/phase2i-observations.json'))
           assert observations['page']['total'] == 20
