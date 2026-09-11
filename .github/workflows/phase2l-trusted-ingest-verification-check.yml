@@ -66,7 +66,7 @@ jobs:
       - name: Compile standalone ingress verifier
         run: |
           rm -rf .phase2l-build
-          npx tsc src/telemetry-ingest-verify.ts \
+          npx tsc --ignoreConfig src/telemetry-ingest-verify.ts \
             --target ES2023 \
             --module ESNext \
             --moduleResolution Bundler \
