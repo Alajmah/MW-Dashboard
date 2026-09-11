@@ -16,7 +16,9 @@ The policy is intentionally simple:
 - high: blocking;
 - moderate/low/info: reported but not automatically blocking in this phase.
 
-The gate prints each vulnerable package, whether it is direct or transitive, the affected range, advisory titles, and npm's available fix metadata. We do not use `npm audit fix --force` automatically because forced major-version changes may alter Wrangler/Workers behavior and must be verified deliberately.
+The initial Phase 2M audit identified three high-severity package entries: direct `wrangler` plus transitive `miniflare` and `sharp`. npm identified Wrangler 4.131.0 as the non-major remediation. The repository therefore upgrades Wrangler from 4.129.0 to 4.131.0 and aligns `@cloudflare/workers-types` with the Wrangler peer requirement. CI then reports zero npm vulnerabilities.
+
+We do not use `npm audit fix --force` automatically because forced major-version changes may alter Wrangler/Workers behavior and must be verified deliberately.
 
 ## 2. Candidate telemetry persistence schema
 
@@ -31,11 +33,11 @@ It models four responsibilities that a later Phase 2N endpoint may need:
 
 The schema intentionally does not store high-cardinality telemetry history. D1 remains the candidate store for latest state, idempotency, source health, quarantine visibility and coarse rollups only.
 
-## 3. Local D1 cost harness
+## 3. Local D1 cost-shape harness
 
 `scripts/phase2m-d1-budget.mjs` creates an isolated local D1 database, applies only the candidate design schema and seeds 5,000 latest-state rows.
 
-It then measures D1-reported `rows_read` and `rows_written` for a representative accepted-delivery path:
+It exercises a representative accepted-delivery persistence path:
 
 1. delivery-ledger miss;
 2. ledger insert;
@@ -44,9 +46,11 @@ It then measures D1-reported `rows_read` and `rows_written` for a representative
 5. 200 latest-observation upserts;
 6. 20 quarantine inserts.
 
-Each operation has a deliberately conservative guardrail. The harness also requires the delivery-id lookup to produce an indexed `SEARCH` plan.
+The harness enforces an indexed `SEARCH` plan for the delivery-id lookup and verifies logical write cardinality: one ledger row, one source-state row, 200 latest-observation rows touched, and 20 quarantine rows.
 
-These numbers are not a Cloudflare billing forecast. They are a regression budget for the local schema shape. Phase 2N must re-measure the full request path against the active canonical-estate queries before production ingestion is enabled.
+Current local Wrangler/Miniflare execution returns zero for `rows_read` and `rows_written` metadata for these operations. Phase 2M therefore does **not** claim that local execution measured Cloudflare billable row reads/writes. The zero counters are recorded explicitly as unavailable local billing evidence rather than treated as a free query path.
+
+This is a schema/query-shape regression guardrail, not a Cloudflare billing forecast. Phase 2N must measure both accepted and authenticated-duplicate request paths against a non-production remote D1, including canonical-estate identity lookup cost, before continuous ingestion is enabled.
 
 ## 4. Representative telemetry-chain load regression
 
@@ -60,7 +64,7 @@ These numbers are not a Cloudflare billing forecast. They are a regression budge
 - durable local spooling;
 - duplicate re-spooling of the first batch to prove content idempotency.
 
-The test reports payload size, spool size, resolution/quarantine counts and elapsed time. Timing is informational only; CI does not encode a wall-clock SLA because shared runners are too variable for a meaningful performance threshold.
+The current CI fixture resolves 4,800 observations and quarantines 200, processes about 3.55 MB of canonical payload, and produces about 5.21 MB of durable spool records. Timing is reported for visibility only; CI does not encode a wall-clock SLA because shared runners are too variable for a meaningful performance threshold.
 
 ## Production boundary
 
@@ -81,6 +85,6 @@ After production recovery and the Phase 2I migration are complete, a production-
 3. generate the canonical identity snapshot from the active estate;
 4. resolve or quarantine every observation without guessing;
 5. skip resolution and state writes for authenticated duplicates;
-6. measure canonical-estate identity lookup row reads in addition to the Phase 2M persistence budget;
+6. measure canonical-estate identity lookup and persistence row reads/writes against non-production remote D1;
 7. demonstrate that one failed/quarantined observation cannot invalidate other valid observations in the same delivery;
 8. retain high-cardinality history outside D1 unless measured evidence justifies otherwise.
