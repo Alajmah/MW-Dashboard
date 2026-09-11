@@ -1,0 +1,59 @@
+name: Administration operational ingestion check
+
+on:
+  pull_request:
+    paths:
+      - "public/administration-ops.js"
+      - "public/administration-ops.css"
+      - "public/shell.js"
+      - ".github/workflows/administration-ops-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/administration-ops.js"
+      - "public/administration-ops.css"
+      - "public/shell.js"
+      - ".github/workflows/administration-ops-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: JavaScript syntax
+        run: node --check public/administration-ops.js && node --check public/shell.js
+
+      - name: Verify operational ingestion contract
+        run: |
+          grep -Fq 'osi.findings.evaluation/v1' public/administration-ops.js
+          grep -Fq '/api/v2/operations/evaluations' public/administration-ops.js
+          grep -Fq '/observations' public/administration-ops.js
+          grep -Fq '/coverage' public/administration-ops.js
+          grep -Fq '/findings' public/administration-ops.js
+          grep -Fq 'result_sha256' public/administration-ops.js
+          grep -Fq 'ADMIN_IMPORT_TOKEN' public/administration-ops.js
+          grep -Fq 'window.osiRefreshOperationalIntelligence' public/administration-ops.js
+
+      - name: Prevent legacy Administration importer ownership
+        run: |
+          grep -Fq 'import "/administration-ops.js' public/shell.js
+          if grep -E 'function legacyView\(view\).*["'"']administration["'"']' public/shell.js; then
+            echo 'Administration must not be routed through the legacy app.js importer.' >&2
+            exit 1
+          fi
+
+      - name: Verify credential handling boundary
+        run: |
+          if grep -E 'localStorage|sessionStorage' public/administration-ops.js; then
+            echo 'Administration token must not be persisted in browser storage.' >&2
+            exit 1
+          fi
+
+      - name: Verify stylesheet exists
+        run: test -s public/administration-ops.css
