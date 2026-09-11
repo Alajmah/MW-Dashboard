@@ -1,0 +1,128 @@
+name: Phase 2H topology impact check
+
+on:
+  pull_request:
+    paths:
+      - "src/bootstrap.ts"
+      - "src/semantic-impact.ts"
+      - "src/semantic-routes.ts"
+      - "public/phase2h-topology-impact.js"
+      - "public/phase2h-topology-impact.css"
+      - "public/shell.js"
+      - "scripts/seed-canonical-routes-ci.sql"
+      - "migrations/**"
+      - "docs/phase-2h-topology-aware-impact.md"
+      - ".github/workflows/phase2h-topology-impact-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/bootstrap.ts"
+      - "src/semantic-impact.ts"
+      - "src/semantic-routes.ts"
+      - "public/phase2h-topology-impact.js"
+      - "public/phase2h-topology-impact.css"
+      - "public/shell.js"
+      - "scripts/seed-canonical-routes-ci.sql"
+      - "migrations/**"
+      - "docs/phase-2h-topology-aware-impact.md"
+      - ".github/workflows/phase2h-topology-impact-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check Worker
+        run: npm run check
+
+      - name: JavaScript syntax
+        run: |
+          node --check public/phase2h-topology-impact.js
+          node --check public/shell.js
+
+      - name: Verify UI semantic boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'data-p2f-tab = "Impact"' public/phase2h-topology-impact.js || grep -Fq 'button.dataset.p2fTab = "Impact"' public/phase2h-topology-impact.js
+          grep -Fq 'Application / service impact' public/phase2h-topology-impact.js
+          grep -Fq 'Not established' public/phase2h-topology-impact.js
+          grep -Fq 'not an active MQ trace' public/phase2h-topology-impact.js
+          grep -Fq 'phase2h-topology-impact.js' public/shell.js
+          ! grep -Eq 'RESET QSTATS|RESET_Q_STATISTICS|dspmqrtj|Prometheus|Grafana|OpenTelemetry' public/phase2h-topology-impact.js
+
+      - name: Apply local D1 migrations
+        run: npm run db:migrate:local
+
+      - name: Seed canonical route fixture
+        run: npx wrangler d1 execute DB --local --file=scripts/seed-canonical-routes-ci.sql
+
+      - name: Start local Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler dev --local --port 8787 --var ADMIN_IMPORT_TOKEN:ci-token > /tmp/wrangler-impact.log 2>&1 &
+          echo $! > /tmp/wrangler-impact.pid
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8787/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/wrangler-impact.log
+          exit 1
+
+      - name: Exercise evidence-bounded impact API
+        shell: bash
+        run: |
+          set -euo pipefail
+          impact="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/routes/impact?entity_id=q-remote')"
+          printf '%s\n' "$impact" > /tmp/impact.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/impact.json'))
+          assert data['schema_version'] == 'osi.route.impact/v1'
+          assert data['entity']['entity_id'] == 'q-remote'
+          assert data['coverage_state'] == 'bounded_segment'
+          assert data['semantics']['application_or_service_impact'] == 'not_established'
+          assert data['semantics']['runtime_access_is_activity'] is False
+          assert data['semantics']['cluster_discovery_is_message_path'] is False
+          assert data['semantics']['trace_candidate_is_proven_route'] is False
+          upstream={(x['neighbor']['entity_id'], x['semantic_type'], x['kind']) for x in data['upstream']}
+          downstream={(x['neighbor']['entity_id'], x['semantic_type'], x['kind']) for x in data['downstream']}
+          assert ('app-producer','runtime.opens_for_output','runtime_access') in upstream
+          assert ('q-target','routing.resolves_to','configured_delivery') in downstream
+          assert any(x.get('xmitq',{}).get('display_name') == 'QM2.XMIT' for x in data['transport'])
+          assert any(x.get('channel',{}).get('display_name') == 'TO.QM2' for x in data['transport'])
+          assert any(x.get('peer_queue_manager',{}).get('display_name') == 'QM2' for x in data['transport'])
+          assert any(x['state'] == 'dynamic' for x in data['unresolved'])
+          assert any(x['from']['entity_id'] == 'app-producer' and x['to']['entity_id'] == 'q-target' and x['proven'] is False for x in data['trace_candidates'])
+          print('Phase 2H impact semantics OK')
+          PY
+
+          trace="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/routes/trace?from=app-producer&to=q-target&max_depth=12')"
+          printf '%s\n' "$trace" > /tmp/impact-trace.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/impact-trace.json'))
+          assert data['found'] is True
+          assert any(x['entity_id'] == 'q-remote' for x in data['nodes'])
+          assert data['semantics']['runtime_access_is_activity'] is False
+          print('Phase 2H passive route correlation OK')
+          PY
+
+      - name: Stop local Worker
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f /tmp/wrangler-impact.pid ]]; then kill "$(cat /tmp/wrangler-impact.pid)" || true; fi
+          tail -120 /tmp/wrangler-impact.log || true
