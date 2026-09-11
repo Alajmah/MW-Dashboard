@@ -1,0 +1,75 @@
+name: Phase 2G investigation clarity check
+
+on:
+  pull_request:
+    paths:
+      - "public/phase2g-investigation-clarity.js"
+      - "public/phase2g-investigation-clarity.css"
+      - "public/shell.js"
+      - "docs/phase-2g-investigation-clarity.md"
+      - ".github/workflows/phase2g-investigation-clarity-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/phase2g-investigation-clarity.js"
+      - "public/phase2g-investigation-clarity.css"
+      - "public/shell.js"
+      - "docs/phase-2g-investigation-clarity.md"
+      - ".github/workflows/phase2g-investigation-clarity-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: JavaScript syntax
+        run: node --check public/phase2g-investigation-clarity.js && node --check public/shell.js
+
+      - name: Verify shell integration
+        run: |
+          grep -Fq 'import "/phase2g-investigation-clarity.js?v=' public/shell.js
+          grep -Fq 'phase2f-investigation-bootstrap.js' public/shell.js
+
+      - name: Verify investigation semantics
+        run: |
+          grep -Fq 'What changed?' public/phase2g-investigation-clarity.js
+          grep -Fq 'Why was this raised?' public/phase2g-investigation-clarity.js
+          grep -Fq 'What can OSI conclude?' public/phase2g-investigation-clarity.js
+          grep -Fq 'What is not concluded?' public/phase2g-investigation-clarity.js
+          grep -Fq 'Collection context' public/phase2g-investigation-clarity.js
+          grep -Fq 'Raw MQ attributes' public/phase2g-investigation-clarity.js
+          grep -Fq 'samples</span>' public/phase2g-investigation-clarity.js
+          grep -Fq 'Locate in Objects' public/phase2g-investigation-clarity.js
+
+      - name: Preserve evidence boundaries
+        run: |
+          if grep -Eiq 'prometheus|grafana|opentelemetry|loki' public/phase2g-investigation-clarity.js; then
+            echo 'Phase 2G must remain OSI-native.' >&2
+            exit 1
+          fi
+          if grep -Eiq 'RESET[[:space:]_]+QSTATS|RESET[[:space:]_]+Q[[:space:]_]*STAT|ALTER[[:space:]]+QMGR' public/phase2g-investigation-clarity.js; then
+            echo 'Phase 2G must not mutate MQ.' >&2
+            exit 1
+          fi
+          if grep -Eiq 'critical[[:space:]_]*threshold|warning[[:space:]_]*threshold|freshness[[:space:]_]*sla' public/phase2g-investigation-clarity.js; then
+            echo 'Phase 2G must not invent thresholds or freshness SLAs.' >&2
+            exit 1
+          fi
+
+      - name: Verify human-readable relationship projection
+        run: |
+          grep -Fq '/api/v2/estate/current/entities/' public/phase2g-investigation-clarity.js
+          grep -Fq 'neighbor?.display_name' public/phase2g-investigation-clarity.js
+          grep -Fq 'humanType' public/phase2g-investigation-clarity.js
+
+      - name: Verify stylesheet and design note
+        run: |
+          test -s public/phase2g-investigation-clarity.css
+          grep -Fq 'browser does not add thresholds' docs/phase-2g-investigation-clarity.md
+          grep -Fq 'human-readable entity name' docs/phase-2g-investigation-clarity.md
