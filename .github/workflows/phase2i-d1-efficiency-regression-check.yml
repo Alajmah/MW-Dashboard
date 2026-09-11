@@ -1,0 +1,160 @@
+name: Phase 2I D1 efficiency and real-evidence regression check
+
+on:
+  pull_request:
+    paths:
+      - "migrations/**"
+      - "fixtures/regression/**"
+      - "scripts/seed-real-mq-regression-ci.sql"
+      - "scripts/test-real-mq-regression.mjs"
+      - "docs/phase-2i-d1-efficiency-real-evidence-regression.md"
+      - ".github/workflows/deploy-cloudflare.yml"
+      - ".github/workflows/phase2i-d1-efficiency-regression-check.yml"
+      - "src/semantic-impact.ts"
+      - "src/semantic-routes.ts"
+      - "src/operational-findings.ts"
+      - "src/semantic-estate-read.ts"
+  push:
+    branches:
+      - main
+    paths:
+      - "migrations/**"
+      - "fixtures/regression/**"
+      - "scripts/seed-real-mq-regression-ci.sql"
+      - "scripts/test-real-mq-regression.mjs"
+      - "docs/phase-2i-d1-efficiency-real-evidence-regression.md"
+      - ".github/workflows/deploy-cloudflare.yml"
+      - ".github/workflows/phase2i-d1-efficiency-regression-check.yml"
+      - "src/semantic-impact.ts"
+      - "src/semantic-routes.ts"
+      - "src/operational-findings.ts"
+      - "src/semantic-estate-read.ts"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check Worker
+        run: npm run check
+
+      - name: Validate sanitized real-shaped fixture
+        run: node scripts/test-real-mq-regression.mjs
+
+      - name: Verify production identifiers are absent from public regression assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(fixtures/regression/mq-real-shape-v1.json scripts/seed-real-mq-regression-ci.sql)
+          ! grep -Eiq 'sjeditb|saudia-prj|SVHUB|SVREP|SVFTA|SVFTC|PAXDATANTFYRQ|TMSNTFY' "${files[@]}"
+          ! grep -Eiq '(^|[^0-9])([0-9]{1,3}\.){3}[0-9]{1,3}([^0-9]|$)' "${files[@]}"
+
+      - name: Apply local D1 migrations
+        run: npm run db:migrate:local
+
+      - name: Verify entity-scoped unresolved query uses the Phase 2I index
+        shell: bash
+        run: |
+          set -euo pipefail
+          plan="$(npx wrangler d1 execute DB --local --command="EXPLAIN QUERY PLAN SELECT unresolved_id, source_entity_id, semantic_type FROM semantic_estate_unresolved WHERE estate_revision_id = 'estate-regression-realshape-001' AND source_entity_id = 'cent_111111111111111111111111' ORDER BY state, semantic_type, unresolved_id")"
+          printf '%s\n' "$plan"
+          printf '%s\n' "$plan" | grep -Fq 'idx_semantic_estate_unresolved_source'
+
+      - name: Seed sanitized MQ regression estate
+        run: npx wrangler d1 execute DB --local --file=scripts/seed-real-mq-regression-ci.sql
+
+      - name: Start local Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler dev --local --port 8787 --var ADMIN_IMPORT_TOKEN:ci-token > /tmp/wrangler-phase2i.log 2>&1 &
+          echo $! > /tmp/wrangler-phase2i.pid
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8787/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/wrangler-phase2i.log
+          exit 1
+
+      - name: Exercise real-shaped investigation and impact path
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          entity="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/estate/entities/cent_111111111111111111111111?relation_limit=20')"
+          printf '%s\n' "$entity" > /tmp/phase2i-entity.json
+
+          observations="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/operations/current/observations?entity_id=cent_111111111111111111111111&limit=100')"
+          printf '%s\n' "$observations" > /tmp/phase2i-observations.json
+
+          findings="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/findings/current?entity_id=cent_111111111111111111111111&limit=20')"
+          printf '%s\n' "$findings" > /tmp/phase2i-findings.json
+
+          impact="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/routes/impact?entity_id=cent_111111111111111111111111')"
+          printf '%s\n' "$impact" > /tmp/phase2i-impact.json
+
+          trace="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/routes/trace?from=cent_333333333333333333333333&to=cent_111111111111111111111111&max_depth=6')"
+          printf '%s\n' "$trace" > /tmp/phase2i-trace.json
+
+          python - <<'PY'
+          import json
+
+          entity=json.load(open('/tmp/phase2i-entity.json'))
+          assert entity['entity']['display_name'] == 'Q.REGRESSION.OUT'
+          assert len(entity['relations']) == 5
+
+          observations=json.load(open('/tmp/phase2i-observations.json'))
+          assert observations['page']['total'] == 20
+          rows=observations['observations']
+          assert len(rows) == 20
+          samples={row['source']['sample_id'] for row in rows}
+          assert len(samples) == 5
+          depth=sorted((row for row in rows if row['observation_type']=='mq.queue.depth.current'), key=lambda row: row['observed_at'])
+          age=sorted((row for row in rows if row['observation_type']=='mq.queue.message.age.oldest_seconds'), key=lambda row: row['observed_at'])
+          ip=sorted((row for row in rows if row['observation_type']=='mq.queue.process.input_count'), key=lambda row: row['observed_at'])
+          op=sorted((row for row in rows if row['observation_type']=='mq.queue.process.output_count'), key=lambda row: row['observed_at'])
+          assert [row['value'] for row in depth] == [1,11,18,33,46]
+          assert [row['value'] for row in age] == [1,65,129,193,258]
+          assert all(row['value'] == 0 for row in ip)
+          assert all(row['value'] == 1 for row in op)
+
+          findings=json.load(open('/tmp/phase2i-findings.json'))
+          assert findings['page']['total'] == 2
+          rules={item['rule_id'] for item in findings['findings']}
+          assert rules == {'mq.queue.oldest_message_aging.v1','mq.queue.backlog_no_input_process.v1'}
+
+          impact=json.load(open('/tmp/phase2i-impact.json'))
+          assert impact['schema_version'] == 'osi.route.impact/v1'
+          assert impact['entity']['entity_id'] == 'cent_111111111111111111111111'
+          assert impact['coverage_state'] == 'upstream_only'
+          assert impact['semantics']['application_or_service_impact'] == 'not_established'
+          assert impact['semantics']['runtime_access_is_activity'] is False
+          assert impact['semantics']['cluster_discovery_is_message_path'] is False
+          assert any(item['neighbor']['entity_id']=='cent_333333333333333333333333' and item['kind']=='runtime_access' for item in impact['upstream'])
+          assert impact['downstream'] == []
+          assert any(item['state']=='dynamic' for item in impact['unresolved'])
+
+          trace=json.load(open('/tmp/phase2i-trace.json'))
+          assert trace['found'] is True
+          assert trace['semantics']['runtime_access_is_activity'] is False
+          assert any(step['semantic_type']=='runtime.opens_for_output' for step in trace['steps'])
+
+          print('Phase 2I real-shaped investigation regression OK')
+          PY
+
+      - name: Stop local Worker
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f /tmp/wrangler-phase2i.pid ]]; then kill "$(cat /tmp/wrangler-phase2i.pid)" || true; fi
+          tail -160 /tmp/wrangler-phase2i.log || true
