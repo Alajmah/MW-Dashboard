@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 
 const root = resolve(".phase2m-d1");
 const tmp = resolve(".phase2m-tmp");
@@ -124,6 +124,7 @@ report.push(measure(
    (entity_id, observation_type, dimensions_key, observed_at, value_json, unit, source_id, delivery_id, quality_json)
    SELECT 'cent_' || printf('%024x', n), 'mq.queue.depth.current', '', '2026-09-11T08:01:00Z', CAST(10000+n AS TEXT), 'messages', 'mq-a.example', 'tdel_000000000000000000000001', '{}'
    FROM seq
+   WHERE 1
    ON CONFLICT(entity_id, observation_type, dimensions_key) DO UPDATE SET
      observed_at=excluded.observed_at,
      value_json=excluded.value_json,
