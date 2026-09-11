@@ -1,0 +1,65 @@
+name: Phase 2D evidence semantics check
+
+on:
+  pull_request:
+    paths:
+      - "public/phase2d-evidence-semantics.js"
+      - "public/phase2d-evidence-semantics.css"
+      - "public/shell.js"
+      - "docs/phase-2d-evidence-freshness-semantics.md"
+      - ".github/workflows/phase2d-evidence-semantics-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/phase2d-evidence-semantics.js"
+      - "public/phase2d-evidence-semantics.css"
+      - "public/shell.js"
+      - "docs/phase-2d-evidence-freshness-semantics.md"
+      - ".github/workflows/phase2d-evidence-semantics-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: JavaScript syntax
+        run: node --check public/phase2d-evidence-semantics.js && node --check public/shell.js
+
+      - name: Verify shell integration
+        run: |
+          grep -Fq 'import "/phase2d-evidence-semantics.js?v=' public/shell.js
+          grep -Fq 'window.osiRefreshEvidenceSemantics?.();' public/shell.js
+
+      - name: Verify evidence semantics
+        run: |
+          grep -Fq 'Latest evidence age' public/phase2d-evidence-semantics.js
+          grep -Fq 'Collection gaps' public/phase2d-evidence-semantics.js
+          grep -Fq 'Observability limitations' public/phase2d-evidence-semantics.js
+          grep -Fq 'mq.observability.' public/phase2d-evidence-semantics.js
+          grep -Fq 'Evidence gaps' public/phase2d-evidence-semantics.js
+          grep -Fq 'latest published operational source' public/phase2d-evidence-semantics.js
+          grep -Fq 'no freshness SLA is assumed' public/phase2d-evidence-semantics.js
+
+      - name: Preserve semantic boundaries
+        run: |
+          grep -Fq 'partial / failed / not collected' <(tr '[:upper:]' '[:lower:]' < public/phase2d-evidence-semantics.js)
+          if grep -Eiq 'prometheus|grafana|opentelemetry|loki' public/phase2d-evidence-semantics.js; then
+            echo 'Phase 2D must remain OSI-native.' >&2
+            exit 1
+          fi
+          if grep -Eiq 'stale[^a-z].*(3600|86400)|freshness.*(15|30|60).*minute' public/phase2d-evidence-semantics.js; then
+            echo 'Phase 2D must not invent a freshness SLA in browser code.' >&2
+            exit 1
+          fi
+
+      - name: Verify stylesheet and design note
+        run: |
+          test -s public/phase2d-evidence-semantics.css
+          grep -Fq 'Age is factual; no freshness SLA is assumed.' docs/phase-2d-evidence-freshness-semantics.md
+          grep -Fq 'mq.observability.*' docs/phase-2d-evidence-freshness-semantics.md
