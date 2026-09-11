@@ -1,0 +1,100 @@
+{
+  "schema_version": "osi.regression.mq-real-shape/v1",
+  "provenance": {
+    "derived_from": "read-only IBM MQ topology/runtime collection",
+    "sanitized": true,
+    "sanitization_note": "All production hostnames, domains, queue-manager names, queue names, network addresses and source identifiers were replaced before committing this fixture. Numerical runtime progression and evidence shape are preserved.",
+    "sample_count": 5,
+    "sample_interval_seconds_declared": 60
+  },
+  "entity": {
+    "entity_id": "cent_111111111111111111111111",
+    "semantic_type": "mq.queue",
+    "display_name": "Q.REGRESSION.OUT",
+    "queue_manager": "QM_HUB_A",
+    "physical_host": "host-a"
+  },
+  "runtime_process": {
+    "entity_id": "cent_333333333333333333333333",
+    "display_name": "mq-runtime-process-a",
+    "relationship": "runtime.opens_for_output",
+    "semantic_boundary": "An output-open handle is access evidence; it is not proof of MQPUT activity."
+  },
+  "samples": [
+    {
+      "sample_id": "sample_001_20260908T051011Z",
+      "observed_at": "2026-09-08T05:10:11Z",
+      "queue_depth": 1,
+      "oldest_message_age_seconds": 1,
+      "input_processes": 0,
+      "output_processes": 1,
+      "last_get_time": "2026-09-08T08:10:00",
+      "last_put_time": "2026-09-08T08:10:10"
+    },
+    {
+      "sample_id": "sample_002_20260908T051115Z",
+      "observed_at": "2026-09-08T05:11:15Z",
+      "queue_depth": 11,
+      "oldest_message_age_seconds": 65,
+      "input_processes": 0,
+      "output_processes": 1,
+      "last_get_time": "2026-09-08T08:10:00",
+      "last_put_time": "2026-09-08T08:11:13"
+    },
+    {
+      "sample_id": "sample_003_20260908T051219Z",
+      "observed_at": "2026-09-08T05:12:19Z",
+      "queue_depth": 18,
+      "oldest_message_age_seconds": 129,
+      "input_processes": 0,
+      "output_processes": 1,
+      "last_get_time": "2026-09-08T08:10:00",
+      "last_put_time": "2026-09-08T08:12:15"
+    },
+    {
+      "sample_id": "sample_004_20260908T051323Z",
+      "observed_at": "2026-09-08T05:13:23Z",
+      "queue_depth": 33,
+      "oldest_message_age_seconds": 193,
+      "input_processes": 0,
+      "output_processes": 1,
+      "last_get_time": "2026-09-08T08:10:00",
+      "last_put_time": "2026-09-08T08:13:23"
+    },
+    {
+      "sample_id": "sample_005_20260908T051428Z",
+      "observed_at": "2026-09-08T05:14:28Z",
+      "queue_depth": 46,
+      "oldest_message_age_seconds": 258,
+      "input_processes": 0,
+      "output_processes": 1,
+      "last_get_time": "2026-09-08T08:10:00",
+      "last_put_time": "2026-09-08T08:14:26"
+    }
+  ],
+  "expected_evidence_facts": {
+    "queue_depth_delta": 45,
+    "oldest_message_age_delta_seconds": 257,
+    "input_process_zero_in_all_samples": true,
+    "output_process_present_in_all_samples": true,
+    "observation_window_samples": 5
+  },
+  "expected_findings": [
+    {
+      "rule_id": "mq.queue.oldest_message_aging.v1",
+      "severity": "warning",
+      "coverage_state": "sufficient"
+    },
+    {
+      "rule_id": "mq.queue.backlog_no_input_process.v1",
+      "severity": "warning",
+      "coverage_state": "sufficient"
+    }
+  ],
+  "semantic_boundaries": {
+    "business_sla_breach": "not_established",
+    "application_or_service_impact": "not_established",
+    "runtime_access_is_message_activity": false,
+    "cluster_visibility_is_message_traversal": false
+  }
+}
