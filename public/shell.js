@@ -11,9 +11,10 @@ import "/phase2d-evidence-semantics.js?v=20260911-1";
 import "/phase2e-triage-compression.js?v=20260911-1";
 import "/phase2f-investigation-bootstrap.js?v=20260911-1";
 import "/phase2g-investigation-clarity.js?v=20260911-1";
+import "/phase2h-topology-impact.js?v=20260911-1";
 import "/administration-ops.js?v=20260911-1";
 
-const UI_ASSET_REVISION = "20260911-5";
+const UI_ASSET_REVISION = "20260911-6";
 
 const shellCopy = {
   overview: ["Overview", "Evidence-backed operational attention across the current canonical middleware estate."],
