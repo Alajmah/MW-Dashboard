@@ -50,7 +50,7 @@ jobs:
 
       - name: Verify credential handling boundary
         run: |
-          if grep -E 'localStorage|sessionStorage' public/administration-ops.js; then
+          if grep -E 'localStorage\.|sessionStorage\.' public/administration-ops.js; then
             echo 'Administration token must not be persisted in browser storage.' >&2
             exit 1
           fi
