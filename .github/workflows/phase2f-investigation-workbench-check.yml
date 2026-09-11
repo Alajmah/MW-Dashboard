@@ -1,0 +1,74 @@
+name: Phase 2F investigation workbench check
+
+on:
+  pull_request:
+    paths:
+      - "public/phase2f-investigation-workbench.js"
+      - "public/phase2f-investigation-bootstrap.js"
+      - "public/phase2f-investigation-workbench.css"
+      - "public/shell.js"
+      - "docs/phase-2f-investigation-workbench.md"
+      - ".github/workflows/phase2f-investigation-workbench-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/phase2f-investigation-workbench.js"
+      - "public/phase2f-investigation-bootstrap.js"
+      - "public/phase2f-investigation-workbench.css"
+      - "public/shell.js"
+      - "docs/phase-2f-investigation-workbench.md"
+      - ".github/workflows/phase2f-investigation-workbench-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: JavaScript syntax
+        run: |
+          node --check public/phase2f-investigation-workbench.js
+          node --check public/phase2f-investigation-bootstrap.js
+          node --check public/shell.js
+
+      - name: Verify shell integration
+        run: |
+          grep -Fq 'import "/phase2f-investigation-bootstrap.js?v=' public/shell.js
+          grep -Fq 'import "/phase2f-investigation-workbench.js?v=' public/phase2f-investigation-bootstrap.js
+
+      - name: Verify direct investigation path
+        run: |
+          grep -Fq 'window.osiOpenObjectWorkspace = async' public/phase2f-investigation-bootstrap.js
+          grep -Fq 'window.osiOpenInvestigationWorkspace = window.osiOpenObjectWorkspace' public/phase2f-investigation-bootstrap.js
+          grep -Fq 'window.osiEnhanceObjectWorkspace' public/phase2f-investigation-workbench.js
+
+      - name: Verify queue evidence projection
+        run: |
+          grep -Fq 'mq.queue.depth.current' public/phase2f-investigation-workbench.js
+          grep -Fq 'mq.queue.message.age.oldest_seconds' public/phase2f-investigation-workbench.js
+          grep -Fq 'mq.queue.process.input_count' public/phase2f-investigation-workbench.js
+          grep -Fq 'mq.queue.process.output_count' public/phase2f-investigation-workbench.js
+          grep -Fq 'Exact evidence references' public/phase2f-investigation-workbench.js
+          grep -Fq 'Monitor is a direct projection of persisted OSI observations' public/phase2f-investigation-workbench.js
+
+      - name: Preserve evaluator and collection boundaries
+        run: |
+          if grep -Eiq 'prometheus|grafana|opentelemetry|loki' public/phase2f-investigation-workbench.js public/phase2f-investigation-bootstrap.js; then
+            echo 'Phase 2F must remain OSI-native.' >&2
+            exit 1
+          fi
+          if grep -Eiq 'RESET[ _-]?Q|ALTER[[:space:]]+QMGR|MONCHL\(ON\)' public/phase2f-investigation-workbench.js; then
+            echo 'Phase 2F must not mutate IBM MQ.' >&2
+            exit 1
+          fi
+
+      - name: Verify design note and stylesheet
+        run: |
+          test -s public/phase2f-investigation-workbench.css
+          grep -Fq 'Overview affected object → Object Investigation Workspace → Findings → Monitor → Evidence' docs/phase-2f-investigation-workbench.md
+          grep -Fq 'browser does not recompute Findings v1 rules' docs/phase-2f-investigation-workbench.md
