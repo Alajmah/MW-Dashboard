@@ -5,7 +5,7 @@
 - the topology collector is a forensic/configuration evidence capture intended to be transferred and normalized later;
 - the observer is a small read-only runtime sampler intended to produce `osi.telemetry.batch/v1` batches.
 
-The observer does **not** publish to Cloudflare, write to D1, consume MQ messages, or change queue-manager state. A later publisher/ingestion component may transport its output after canonical identity resolution and retention policy are defined.
+The observer does **not** publish to Cloudflare, write to D1, consume MQ messages, or change queue-manager state. Phase 2K keeps outbound delivery in a separate `telemetry_delivery.py` process so network failure or publisher credentials cannot expand the observer's MQ authority.
 
 ## Safety boundary
 
@@ -47,6 +47,53 @@ python3 osi_mq_observer.py --qmgr QM1 --samples 5 --interval 60 --output telemet
 
 This is an explicit foreground command. The repository does not install a daemon, cron entry, systemd service, or remote publisher.
 
+## Durable outbound spool
+
+Phase 2K adds a separate durable spool. Enqueue an observer batch with:
+
+```bash
+python3 telemetry_delivery.py spool \
+  --input telemetry.json \
+  --spool-dir /var/spool/osi-telemetry
+```
+
+The delivery ID is derived from the canonical JSON payload, so re-spooling the same logical batch is idempotent even when whitespace or input key ordering differs.
+
+Inspect local state without any network request:
+
+```bash
+python3 telemetry_delivery.py status --spool-dir /var/spool/osi-telemetry
+```
+
+A future private-side service can invoke `send` periodically. The publisher requires a narrow HMAC delivery secret and HTTPS endpoint; it has no MQSC, D1, Wrangler, or dashboard-administration capability:
+
+```bash
+export OSI_TELEMETRY_SECRET='...'
+python3 telemetry_delivery.py send \
+  --spool-dir /var/spool/osi-telemetry \
+  --endpoint https://example.invalid/api/v2/telemetry/ingest \
+  --key-id mq-host-a
+```
+
+No production endpoint is enabled by this repository slice.
+
+## Trusted canonical identity resolution
+
+The observer does **not** mint `cent_*` identifiers. Each observation carries source-native identity hints such as queue-manager name, QMID when available, and object name.
+
+At the trusted ingestion side, `telemetry_resolver.py` can resolve those hints against an explicit `osi.telemetry.identity-snapshot/v1` projection:
+
+```bash
+python3 telemetry_resolver.py \
+  --batch telemetry.json \
+  --identity-snapshot canonical-identity-snapshot.json \
+  --output resolution.json
+```
+
+Incoming non-null `canonical_entity_id` values are treated as untrusted and quarantined. QMID is authoritative when present; a missing QMID match does not silently fall back to queue-manager name. Ambiguous or conflicted canonical identities are quarantined rather than guessed.
+
+This prevents a telemetry label, replaced queue manager, or transient channel instance from becoming the system of record for identity.
+
 ## Baseline metrics
 
 The first profile intentionally mirrors the observation names already used by the operational findings pipeline:
@@ -61,12 +108,6 @@ The first profile intentionally mirrors the observation names already used by th
 - `mq.listener.status`
 
 Channel-instance fields such as `JOBNAME`, `CONNAME`, and `RAPPLTAG` are dimensions. They do not redefine the canonical channel identity.
-
-## Canonical identity rule
-
-The observer does **not** mint `cent_*` identifiers. Each observation carries source-native identity hints such as queue-manager name, QMID when available, and object name. A future resolver/publisher must match those hints to the canonical estate before setting `canonical_entity_id` or converting the telemetry item into the existing operational-observation persistence shape.
-
-This prevents a telemetry label or transient channel instance from becoming the system of record for identity.
 
 ## Coverage semantics
 
