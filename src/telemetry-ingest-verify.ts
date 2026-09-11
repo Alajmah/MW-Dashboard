@@ -72,7 +72,13 @@ function bytesToHex(bytes: Uint8Array): string {
   return output;
 }
 
-function hexToBytes(value: string): Uint8Array | null {
+function ownedBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy;
+}
+
+function hexToBytes(value: string): Uint8Array<ArrayBuffer> | null {
   if (value.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(value)) return null;
   const out = new Uint8Array(value.length / 2);
   for (let index = 0; index < out.length; index++) {
@@ -82,7 +88,7 @@ function hexToBytes(value: string): Uint8Array | null {
 }
 
 async function sha256Hex(payload: Uint8Array): Promise<string> {
-  return bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", payload)));
+  return bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", ownedBytes(payload))));
 }
 
 async function verifyHmac(secret: string, message: string, suppliedHex: string): Promise<boolean> {
@@ -90,12 +96,12 @@ async function verifyHmac(secret: string, message: string, suppliedHex: string):
   if (!supplied || !secret) return false;
   const key = await crypto.subtle.importKey(
     "raw",
-    UTF8.encode(secret),
+    ownedBytes(UTF8.encode(secret)),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["verify"],
   );
-  return crypto.subtle.verify("HMAC", key, supplied, UTF8.encode(message));
+  return crypto.subtle.verify("HMAC", key, supplied, ownedBytes(UTF8.encode(message)));
 }
 
 function parseBatch(payload: Uint8Array): { batch: Record<string, unknown>; source_id: string } | null {
