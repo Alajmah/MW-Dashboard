@@ -4,6 +4,7 @@ import { importAuthorizationDenial } from "./import-auth";
 import { handleOperationalFindings } from "./operational-findings";
 import { handleSemanticEstate } from "./semantic-estate";
 import { handleSemanticEstateRead } from "./semantic-estate-read";
+import { handleSemanticImpact } from "./semantic-impact";
 import { handleSemanticImport } from "./semantic-import";
 import { handleSemanticRoutes } from "./semantic-routes";
 
@@ -95,6 +96,9 @@ export default {
       ADMIN_IMPORT_TOKEN: env.ADMIN_IMPORT_TOKEN,
     });
     if (operationalFindings) return operationalFindings;
+
+    const semanticImpact = await handleSemanticImpact(request, { DB: env.DB });
+    if (semanticImpact) return semanticImpact;
 
     const semanticRoutes = await handleSemanticRoutes(request, { DB: env.DB });
     if (semanticRoutes) return semanticRoutes;
