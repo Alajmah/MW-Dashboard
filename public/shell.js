@@ -6,6 +6,7 @@ import "/explore-boundary.js?v=20260910-4";
 import "/explore-pivot.js?v=20260910-4";
 import "/workstation-ui.js?v=20260910-1";
 import "/wave1-shell-cleanup.js?v=20260910-1";
+import "/phase2i-overview-read-broker.js?v=20260911-1";
 import "/operational-intelligence.js?v=20260910-1";
 import "/phase2d-evidence-semantics.js?v=20260911-1";
 import "/phase2e-triage-compression.js?v=20260911-1";
@@ -14,7 +15,7 @@ import "/phase2g-investigation-clarity.js?v=20260911-1";
 import "/phase2h-topology-impact.js?v=20260911-1";
 import "/administration-ops.js?v=20260911-1";
 
-const UI_ASSET_REVISION = "20260911-6";
+const UI_ASSET_REVISION = "20260911-7";
 
 const shellCopy = {
   overview: ["Overview", "Evidence-backed operational attention across the current canonical middleware estate."],
