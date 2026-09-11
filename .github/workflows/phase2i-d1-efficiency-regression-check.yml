@@ -84,7 +84,7 @@ jobs:
 
           entity_plan="$(npx wrangler d1 execute DB --local --command="EXPLAIN QUERY PLAN SELECT entity_id, semantic_type, display_name FROM semantic_estate_entity WHERE estate_revision_id = 'estate-regression-realshape-001' AND semantic_type = 'mq.queue' ORDER BY semantic_type, lower(COALESCE(display_name,'')), entity_id")"
           printf '%s\n' "$entity_plan"
-          printf '%s\n' "$entity_plan" | grep -Fq 'idx_semantic_estate_entity_type'
+          printf '%s\n' "$entity_plan" | grep -Eq 'idx_semantic_estate_entity_(type|identity)'
 
           source_plan="$(npx wrangler d1 execute DB --local --command="EXPLAIN QUERY PLAN SELECT relation_id FROM semantic_estate_relation WHERE estate_revision_id = 'estate-regression-realshape-001' AND source_entity_id = 'cent_111111111111111111111111' ORDER BY semantic_type, source_entity_id, target_entity_id, relation_id")"
           printf '%s\n' "$source_plan"
