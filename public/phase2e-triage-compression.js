@@ -1,4 +1,4 @@
-const PHASE2E_REVISION = "20260911-1";
+const PHASE2E_REVISION = "20260911-2";
 const PHASE2E_PAGE_SIZE = 200;
 
 const phase2eState = {
@@ -174,6 +174,7 @@ function patchEvidenceChronology(latestObservation) {
   const observedAt = latestObservation.observed_at || "";
   const evaluatedAt = latestObservation?.evaluation?.evaluated_at || "";
   const host = latestObservation?.evaluation?.source_host || latestObservation?.source?.source_host || "";
+  card.classList.add("phase2e-evidence-chronology");
   card.innerHTML = `
     <span>Evidence chronology</span>
     <strong>${observedAt ? `Observed ${p2eEsc(relativeAge(observedAt))}` : "Observation timestamp unavailable"}</strong>
@@ -231,7 +232,8 @@ function patchEvidenceGapPanel(estateSummary) {
   if (!unknownNames.length) return;
   const banner = document.createElement("div");
   banner.className = "phase2e-next-evidence";
-  banner.innerHTML = `<div><span>Next evidence action</span><strong>Collect peer MQ hosts</strong><small>${unknownNames.length} logical queue manager${unknownNames.length === 1 ? "" : "s"} still lack physical placement evidence: ${p2eEsc(unknownNames.join(", "))}.</small></div><button type="button" data-go="snapshots">Open Collection</button>`;
+  banner.innerHTML = `<div><span>Next evidence action</span><strong>Collect peer MQ hosts</strong><small>${unknownNames.length} logical queue manager${unknownNames.length === 1 ? "" : "s"} still lack physical placement evidence: ${p2eEsc(unknownNames.join(", "))}.</small></div><button type="button">Open Collection</button>`;
+  banner.querySelector("button")?.addEventListener("click", () => window.osiNavigateProduct?.("snapshots"));
   gaps.insertAdjacentElement("beforebegin", banner);
 }
 
@@ -289,14 +291,16 @@ function scheduleRefresh(delay = 160) {
 installPhase2EStyles();
 const phase2eObserver = new MutationObserver((mutations) => {
   if (phase2eCurrentView() !== "overview") return;
-  const relevant = mutations.some((mutation) => mutation.type === "childList" && (
-    mutation.target.id === "operationalAttentionList"
-    || mutation.target.id === "overviewQmgrs"
-    || mutation.target.id === "placementGaps"
-    || mutation.target.id === "operationalEvidenceState"
-    || mutation.target.closest?.("#operationalAttention, #overviewQmgrs, #placementGaps, #operationalEvidenceState")
-  ));
-  if (relevant) scheduleRefresh(220);
+  let shouldRefresh = false;
+  for (const mutation of mutations) {
+    if (mutation.type !== "childList") continue;
+    const target = mutation.target;
+    if (target?.id === "operationalAttentionList" && !target.querySelector?.(".phase2e-triage-block")) shouldRefresh = true;
+    if (target?.id === "overviewQmgrs" && target.querySelector?.(".qmgr-ledger:not(.phase2e-compressed)")) shouldRefresh = true;
+    if (target?.id === "placementGaps" && !target.closest?.(".panel")?.querySelector(".phase2e-next-evidence")) shouldRefresh = true;
+    if (target?.id === "operationalEvidenceState" && !target.querySelector?.(".phase2e-evidence-chronology")) shouldRefresh = true;
+  }
+  if (shouldRefresh) scheduleRefresh(220);
   schedulePhase2EDomPass();
 });
 phase2eObserver.observe(document.body, { childList: true, subtree: true });
