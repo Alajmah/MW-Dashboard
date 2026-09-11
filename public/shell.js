@@ -7,9 +7,10 @@ import "/explore-pivot.js?v=20260910-4";
 import "/workstation-ui.js?v=20260910-1";
 import "/wave1-shell-cleanup.js?v=20260910-1";
 import "/operational-intelligence.js?v=20260910-1";
+import "/phase2d-evidence-semantics.js?v=20260911-1";
 import "/administration-ops.js?v=20260911-1";
 
-const UI_ASSET_REVISION = "20260911-1";
+const UI_ASSET_REVISION = "20260911-2";
 
 const shellCopy = {
   overview: ["Overview", "Evidence-backed operational attention across the current canonical middleware estate."],
@@ -38,6 +39,7 @@ function shellSetView(view) {
   window.osiRefreshWorkstationUI?.();
   window.osiProductShellRefresh?.();
   window.osiRefreshOperationalIntelligence?.();
+  window.osiRefreshEvidenceSemantics?.();
   if (view === "administration") window.osiRenderAdministrationOps?.();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -85,6 +87,7 @@ async function navigate(view) {
       await window.osiRestoreCanonicalExploreControls?.();
       window.osiProductShellRefresh?.();
       window.osiRefreshOperationalIntelligence?.();
+      window.osiRefreshEvidenceSemantics?.();
       return;
     }
     if (view === "administration") {
@@ -127,6 +130,7 @@ document.addEventListener("click", (event) => {
     if (view === "overview") {
       setTimeout(() => window.osiRenderQmgrLedger?.(), 0);
       setTimeout(() => window.osiRefreshOperationalIntelligence?.(), 80);
+      setTimeout(() => window.osiRefreshEvidenceSemantics?.(), 220);
     }
     if (view === "inventory") {
       setTimeout(() => window.osiRestoreCanonicalExploreControls?.(), 0);
@@ -134,6 +138,7 @@ document.addEventListener("click", (event) => {
       setTimeout(() => window.osiRefreshWorkstationUI?.(), 160);
       setTimeout(() => window.osiProductShellRefresh?.(), 180);
       setTimeout(() => window.osiRefreshOperationalIntelligence?.(), 200);
+      setTimeout(() => window.osiRefreshEvidenceSemantics?.(), 240);
     }
     if (view === "routes") setTimeout(() => window.osiRefreshWorkstationUI?.(), 120);
     if (view === "administration") setTimeout(() => window.osiRenderAdministrationOps?.(), 0);
