@@ -1,0 +1,64 @@
+name: Phase 2E triage compression check
+
+on:
+  pull_request:
+    paths:
+      - "public/phase2e-triage-compression.js"
+      - "public/phase2e-triage-compression.css"
+      - "public/shell.js"
+      - "docs/phase-2e-operational-triage-compression.md"
+      - ".github/workflows/phase2e-triage-compression-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/phase2e-triage-compression.js"
+      - "public/phase2e-triage-compression.css"
+      - "public/shell.js"
+      - "docs/phase-2e-operational-triage-compression.md"
+      - ".github/workflows/phase2e-triage-compression-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: JavaScript syntax
+        run: node --check public/phase2e-triage-compression.js && node --check public/shell.js
+
+      - name: Verify shell integration
+        run: |
+          grep -Fq 'import "/phase2e-triage-compression.js?v=' public/shell.js
+          grep -Fq 'window.osiRefreshTriageCompression?.();' public/shell.js
+
+      - name: Verify triage semantics
+        run: |
+          grep -Fq 'Actionable objects' public/phase2e-triage-compression.js
+          grep -Fq 'Diagnostic limitations' public/phase2e-triage-compression.js
+          grep -Fq 'Each object appears once' public/phase2e-triage-compression.js
+          grep -Fq 'Collect peer MQ hosts' public/phase2e-triage-compression.js
+          grep -Fq 'Evidence chronology' public/phase2e-triage-compression.js
+          grep -Fq 'no freshness SLA is assumed' public/phase2e-triage-compression.js
+          grep -Fq 'mq.observability.' public/phase2e-triage-compression.js
+
+      - name: Preserve OSI boundaries
+        run: |
+          if grep -Eiq 'prometheus|grafana|opentelemetry|loki' public/phase2e-triage-compression.js; then
+            echo 'Phase 2E must remain OSI-native.' >&2
+            exit 1
+          fi
+          if grep -Eiq 'stale[^a-z].*(3600|86400)|freshness.*(15|30|60).*minute' public/phase2e-triage-compression.js; then
+            echo 'Phase 2E must not invent a freshness SLA.' >&2
+            exit 1
+          fi
+
+      - name: Verify stylesheet and design note
+        run: |
+          test -s public/phase2e-triage-compression.css
+          grep -Fq 'grouped by canonical `entity_id`' docs/phase-2e-operational-triage-compression.md
+          grep -Fq 'Collect peer MQ hosts' docs/phase-2e-operational-triage-compression.md
