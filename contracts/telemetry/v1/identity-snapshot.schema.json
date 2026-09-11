@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mw-dashboard.local/contracts/telemetry/v1/identity-snapshot.schema.json",
+  "title": "OSI Telemetry Identity Snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "estate_revision_id", "built_at", "entities"],
+  "properties": {
+    "schema_version": {"const": "osi.telemetry.identity-snapshot/v1"},
+    "estate_revision_id": {"type": "string", "minLength": 1},
+    "built_at": {"type": "string", "format": "date-time"},
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["entity_id", "semantic_type", "identity_rule", "identity_key", "identity_state", "display_name", "properties"],
+        "properties": {
+          "entity_id": {"type": "string", "pattern": "^cent_[0-9a-f]{24}$"},
+          "semantic_type": {"type": "string", "minLength": 1},
+          "identity_rule": {"type": "string", "minLength": 1},
+          "identity_key": {"type": "string", "minLength": 1},
+          "identity_state": {"enum": ["resolved", "ambiguous", "conflicted"]},
+          "display_name": {"type": "string", "minLength": 1},
+          "properties": {"type": "object"}
+        }
+      }
+    }
+  }
+}
