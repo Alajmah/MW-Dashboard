@@ -29,6 +29,11 @@ function countResult(result: D1Result<unknown>): number {
   return Number((result.results?.[0] as { count?: number } | undefined)?.count ?? 0);
 }
 
+function addFilter(clauses: string[], bindings: unknown[], clause: string, ...values: unknown[]): void {
+  clauses.push(clause);
+  bindings.push(...values);
+}
+
 async function currentEstate(db: D1Database): Promise<Row | null> {
   return await db.prepare(
     `SELECT estate_revision_id, source_set_hash, source_revision_ids_json, built_at, activated_at,
@@ -94,20 +99,18 @@ async function summary(env: SemanticEstateReadEnv): Promise<Response> {
   if (estateOrResponse instanceof Response) return estateOrResponse;
   const estate = estateOrResponse;
   const estateId = String(estate.estate_revision_id);
-  const results = await env.DB.batch([
+
+  // Keep the current-estate entity projection to one scan. The previous shape
+  // separately scanned the same entity set for type counts, identity-state
+  // counts, and multi-source count on every summary request.
+  const [entityRollup, unresolvedRollup] = await env.DB.batch([
     env.DB.prepare(
-      `SELECT semantic_type, COUNT(*) AS count
+      `SELECT semantic_type, identity_state, COUNT(*) AS count,
+              SUM(CASE WHEN source_count > 1 THEN 1 ELSE 0 END) AS multi_source_count
          FROM semantic_estate_entity
         WHERE estate_revision_id = ?
-        GROUP BY semantic_type
-        ORDER BY semantic_type`
-    ).bind(estateId),
-    env.DB.prepare(
-      `SELECT identity_state, COUNT(*) AS count
-         FROM semantic_estate_entity
-        WHERE estate_revision_id = ?
-        GROUP BY identity_state
-        ORDER BY identity_state`
+        GROUP BY semantic_type, identity_state
+        ORDER BY semantic_type, identity_state`
     ).bind(estateId),
     env.DB.prepare(
       `SELECT state, COUNT(*) AS count
@@ -116,20 +119,21 @@ async function summary(env: SemanticEstateReadEnv): Promise<Response> {
         GROUP BY state
         ORDER BY state`
     ).bind(estateId),
-    env.DB.prepare(
-      `SELECT COUNT(*) AS count
-         FROM semantic_estate_entity
-        WHERE estate_revision_id = ? AND source_count > 1`
-    ).bind(estateId),
   ]);
 
-  const byType = Object.fromEntries((results[0].results ?? []).map((row) => [
-    String((row as Row).semantic_type), Number((row as Row).count ?? 0),
-  ]));
-  const identityStates = Object.fromEntries((results[1].results ?? []).map((row) => [
-    String((row as Row).identity_state), Number((row as Row).count ?? 0),
-  ]));
-  const unresolvedStates = Object.fromEntries((results[2].results ?? []).map((row) => [
+  const byType: Record<string, number> = {};
+  const identityStates: Record<string, number> = {};
+  let multiSourceEntities = 0;
+  for (const raw of entityRollup.results ?? []) {
+    const row = raw as Row;
+    const count = Number(row.count ?? 0);
+    const semanticType = String(row.semantic_type ?? "");
+    const identityState = String(row.identity_state ?? "");
+    if (semanticType) byType[semanticType] = (byType[semanticType] ?? 0) + count;
+    if (identityState) identityStates[identityState] = (identityStates[identityState] ?? 0) + count;
+    multiSourceEntities += Number(row.multi_source_count ?? 0);
+  }
+  const unresolvedStates = Object.fromEntries((unresolvedRollup.results ?? []).map((row) => [
     String((row as Row).state), Number((row as Row).count ?? 0),
   ]));
 
@@ -140,7 +144,7 @@ async function summary(env: SemanticEstateReadEnv): Promise<Response> {
       entities: Number(estate.entity_count ?? 0),
       relations: Number(estate.relation_count ?? 0),
       unresolved: Number(estate.unresolved_count ?? 0),
-      multi_source_entities: countResult(results[3]),
+      multi_source_entities: multiSourceEntities,
     },
     entities_by_type: byType,
     identity_states: identityStates,
@@ -161,11 +165,22 @@ async function listEntities(request: Request, env: SemanticEstateReadEnv): Promi
   const limit = Math.max(1, integerParam(url, "limit", DEFAULT_LIMIT, MAX_LIMIT));
   const offset = integerParam(url, "offset", 0, MAX_OFFSET);
 
-  const where = `estate_revision_id = ?
-             AND (? = '' OR semantic_type = ?)
-             AND (? = '' OR identity_state = ?)
-             AND (? = '' OR lower(COALESCE(display_name,'')) LIKE '%' || ? || '%' OR lower(identity_key) LIKE '%' || ? || '%')`;
-  const bindings = [estateId, semanticType, semanticType, identityState, identityState, query, query, query] as const;
+  const clauses = ["estate_revision_id = ?"];
+  const bindings: unknown[] = [estateId];
+  if (semanticType) addFilter(clauses, bindings, "semantic_type = ?", semanticType);
+  if (identityState) addFilter(clauses, bindings, "identity_state = ?", identityState);
+  if (query) {
+    // Contains search is intentionally explicit. A normal B-tree cannot serve
+    // leading-wildcard search; exact filters above remain independently indexable.
+    addFilter(
+      clauses,
+      bindings,
+      "(lower(COALESCE(display_name,'')) LIKE '%' || ? || '%' OR lower(identity_key) LIKE '%' || ? || '%')",
+      query,
+      query,
+    );
+  }
+  const where = clauses.join("\n             AND ");
   const [rows, total] = await env.DB.batch([
     env.DB.prepare(
       `SELECT entity_id, semantic_type, identity_rule, identity_key, identity_state, display_name,
@@ -269,11 +284,12 @@ async function listRelations(request: Request, env: SemanticEstateReadEnv): Prom
   const limit = Math.max(1, integerParam(url, "limit", DEFAULT_LIMIT, MAX_LIMIT));
   const offset = integerParam(url, "offset", 0, MAX_OFFSET);
 
-  const where = `estate_revision_id = ?
-             AND (? = '' OR semantic_type = ?)
-             AND (? = '' OR source_entity_id = ?)
-             AND (? = '' OR target_entity_id = ?)`;
-  const bindings = [estateId, semanticType, semanticType, sourceEntityId, sourceEntityId, targetEntityId, targetEntityId] as const;
+  const clauses = ["estate_revision_id = ?"];
+  const bindings: unknown[] = [estateId];
+  if (semanticType) addFilter(clauses, bindings, "semantic_type = ?", semanticType);
+  if (sourceEntityId) addFilter(clauses, bindings, "source_entity_id = ?", sourceEntityId);
+  if (targetEntityId) addFilter(clauses, bindings, "target_entity_id = ?", targetEntityId);
+  const where = clauses.join("\n             AND ");
   const [rows, total] = await env.DB.batch([
     env.DB.prepare(
       `SELECT relation_id, semantic_type, source_entity_id, target_entity_id, observed_at,
@@ -319,8 +335,12 @@ async function listUnresolved(request: Request, env: SemanticEstateReadEnv): Pro
   const semanticType = textParam(url, "semantic_type", 200);
   const limit = Math.max(1, integerParam(url, "limit", DEFAULT_LIMIT, MAX_LIMIT));
   const offset = integerParam(url, "offset", 0, MAX_OFFSET);
-  const where = `estate_revision_id = ? AND (? = '' OR state = ?) AND (? = '' OR semantic_type = ?)`;
-  const bindings = [estateId, state, state, semanticType, semanticType] as const;
+
+  const clauses = ["estate_revision_id = ?"];
+  const bindings: unknown[] = [estateId];
+  if (state) addFilter(clauses, bindings, "state = ?", state);
+  if (semanticType) addFilter(clauses, bindings, "semantic_type = ?", semanticType);
+  const where = clauses.join(" AND ");
   const [rows, total] = await env.DB.batch([
     env.DB.prepare(
       `SELECT unresolved_id, source_entity_id, semantic_type, expected_target_type, vendor_value, state, reason,
