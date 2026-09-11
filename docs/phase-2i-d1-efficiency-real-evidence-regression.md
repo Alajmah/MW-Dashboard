@@ -74,13 +74,14 @@ WHERE estate_revision_id = ? AND source_entity_id = ?
 
 The same approach is applied to entity, relation and unresolved list readers. The contains-search predicate is added only when `q` is non-empty.
 
-Local `EXPLAIN QUERY PLAN` CI guards require filtered reads to retain the existing selective indexes for:
+Local `EXPLAIN QUERY PLAN` CI guards require filtered reads to retain existing selective access paths for:
 
-- entity semantic type;
+- entity semantic type, through one of the existing indexes whose prefix is `(estate_revision_id, semantic_type)`;
 - relation source entity;
 - relation target entity;
-- unresolved state;
 - Phase 2I unresolved source entity.
+
+The ordered unresolved-state list is logged but deliberately does not force a specific index. Local SQLite currently prefers the new unresolved-source covering index for that exact `ORDER BY` shape even though `state` is filtered. The current unresolved set is small, so Phase 2I does not add or force another index without remote row-read evidence.
 
 ### Good existing access paths
 
@@ -187,7 +188,7 @@ The Phase 2I workflow performs only local/CI operations:
 1. validates that the sanitized fixture contains no known production tokens or IPv4 addresses;
 2. verifies the Overview read broker coalesces overlapping current-state requests and invalidates on mutation;
 3. applies all D1 migrations to local D1;
-4. checks entity-source unresolved and selective entity/relation/unresolved query plans;
+4. checks entity-source unresolved and selective entity/relation query plans while logging the ordered unresolved-state plan for evidence;
 5. seeds the sanitized canonical estate, operational observations, findings and unresolved destination boundary;
 6. starts the Worker locally;
 7. verifies the one-pass canonical summary and filtered canonical list response contracts;
