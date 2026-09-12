@@ -104,7 +104,7 @@ def classify_path(path: Path) -> tuple[str, str] | None:
             return "ibm_mq", "operational_findings"
         if "datapower" in full and name.endswith(SUPPORTED_ARCHIVE_SUFFIXES):
             return "ibm_datapower", "manual_log_export"
-    elif path.is_dir() and "datapower" in name:
+    elif path.is_dir() and "datapower" in name and not name.startswith("analysis-") and not (path / "summary.json").exists():
         return "ibm_datapower", "manual_log_export"
     return None
 
@@ -159,8 +159,6 @@ def artifact_record(path: Path, root: Path, product: str, evidence_class: str) -
 def discover_artifacts(root: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     consumed_dirs: set[Path] = set()
-
-    # DataPower manual-export directories are treated as one immutable evidence unit.
     directories = (p for p in root.rglob("*") if p.is_dir() and not p.is_symlink())
     for path in sorted(directories, key=lambda p: str(p)):
         classification = classify_path(path)
@@ -175,7 +173,6 @@ def discover_artifacts(root: Path) -> list[dict[str, Any]]:
             continue
         classification = classify_path(path)
         if not classification:
-            # Contract-aware fallback for findings whose filenames changed.
             if path.suffix.lower() == ".json":
                 doc = json_read(path)
                 if isinstance(doc, dict) and doc.get("schema_version") == "osi.findings.evaluation/v1":
@@ -199,7 +196,6 @@ def discover_analysis(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, 
         candidate_doc = json_read(candidate_path) if candidate_path.exists() else None
         if not isinstance(summary, dict):
             continue
-
         schema = str(summary.get("schema_version", ""))
         if schema == "osi.mq-log-analysis/v1":
             product = "ibm_mq"
@@ -208,7 +204,6 @@ def discover_analysis(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, 
             product = {"ace": "ibm_ace", "datapower": "ibm_datapower"}.get(source_product, "unknown")
         else:
             continue
-
         summary_digest = sha256_file(summary_path)
         analyses.append({
             "analysis_id": "analysis_" + summary_digest[:24],
@@ -219,7 +214,6 @@ def discover_analysis(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, 
             "candidate_file_present": candidate_path.exists(),
             "candidate_file_sha256": sha256_file(candidate_path) if candidate_path.exists() else None,
         })
-
         raw_candidates = candidate_doc.get("candidates", []) if isinstance(candidate_doc, dict) else []
         if not isinstance(raw_candidates, list):
             continue
@@ -309,11 +303,9 @@ def main() -> int:
     parser.add_argument("root", help="Campaign root containing evidence packages and offline analyzer outputs")
     parser.add_argument("--output", default="campaign-index.json", help="Output JSON path")
     args = parser.parse_args()
-
     root = Path(args.root).expanduser().resolve()
     if not root.is_dir():
         parser.error(f"campaign root is not a directory: {root}")
-
     output = Path(args.output).expanduser().resolve()
     artifacts = discover_artifacts(root)
     analyses, candidates = discover_analysis(root)
@@ -322,7 +314,6 @@ def main() -> int:
     class_counts = Counter(a["evidence_class"] for a in artifacts)
     digest_material = "\n".join(sorted(a["sha256"] for a in artifacts)).encode("ascii")
     campaign_hash = hashlib.sha256(digest_material).hexdigest()
-
     result = {
         "schema_version": "osi.demo.evidence-campaign/v1",
         "tool_version": VERSION,
