@@ -1,0 +1,128 @@
+name: Phase 2L trusted ingress verification check
+
+on:
+  pull_request:
+    paths:
+      - "src/telemetry-ingest-verify.ts"
+      - "contracts/telemetry/v1/**"
+      - "collectors/ibm-mq/observer/telemetry_delivery.py"
+      - "scripts/test-telemetry-ingest-verify.mjs"
+      - "docs/phase-2l-trusted-ingest-verification.md"
+      - ".github/workflows/phase2l-trusted-ingest-verification-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/telemetry-ingest-verify.ts"
+      - "contracts/telemetry/v1/**"
+      - "collectors/ibm-mq/observer/telemetry_delivery.py"
+      - "scripts/test-telemetry-ingest-verify.mjs"
+      - "docs/phase-2l-trusted-ingest-verification.md"
+      - ".github/workflows/phase2l-trusted-ingest-verification-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check Worker
+        run: npm run check
+
+      - name: Validate telemetry contract JSON
+        run: |
+          python3 -m json.tool contracts/telemetry/v1/telemetry-batch.schema.json >/dev/null
+          python3 -m json.tool contracts/telemetry/v1/identity-snapshot.schema.json >/dev/null
+          python3 -m json.tool contracts/telemetry/v1/resolution-result.schema.json >/dev/null
+          python3 -m json.tool contracts/telemetry/v1/ingest-ack.schema.json >/dev/null
+
+      - name: Prove this slice adds no production route or migration
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${BASE_SHA:-}" ]; then
+            changed="$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA")"
+            printf '%s\n' "$changed"
+            if printf '%s\n' "$changed" | grep -Eq '^(migrations/|src/index\.ts$|wrangler\.toml$)'; then
+              echo "Phase 2L must not add a production route, binding, or D1 migration" >&2
+              exit 1
+            fi
+          fi
+          ! grep -Fq 'telemetry-ingest-verify' src/index.ts
+
+      - name: Prove verifier has no MQ or D1 authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=src/telemetry-ingest-verify.ts
+          ! grep -Eiq '\b(runmqsc|dspmq|D1Database|wrangler|ADMIN_IMPORT_TOKEN)\b' "$file"
+          grep -Fq 'const signingMessage = `v1\\n${timestampText}\\n${keyId}\\n${expectedDelivery}\\n${expectedDigest}`' "$file"
+          grep -Fq 'DEFAULT_MAX_BODY_BYTES = 32 * 1024 * 1024' "$file"
+          grep -Fq 'MIN_SECRET_BYTES = 32' "$file"
+
+      - name: Compile standalone ingress verifier
+        run: |
+          rm -rf .phase2l-build
+          npx tsc --ignoreConfig src/telemetry-ingest-verify.ts \
+            --target ES2023 \
+            --module ESNext \
+            --moduleResolution Bundler \
+            --lib ES2023,DOM \
+            --skipLibCheck \
+            --outDir .phase2l-build
+
+      - name: Generate signed Python interoperability vector
+        env:
+          PYTHONPATH: collectors/ibm-mq/observer
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from telemetry_delivery import canonical_json_bytes, signed_headers
+
+          batch = {
+              "schema_version": "osi.telemetry.batch/v1",
+              "run": {
+                  "run_id": "telemetry_phase2l_interop",
+                  "observer": "osi-mq-observer",
+                  "observer_version": "0.2.0",
+                  "profile": "baseline",
+                  "started_at": "2026-09-12T07:00:00Z",
+                  "completed_at": "2026-09-12T07:00:01Z",
+                  "sample_count": 1,
+                  "sample_interval_seconds": 60,
+                  "source": {
+                      "kind": "ibm_mq_host",
+                      "source_id": "mq-phase2l.example",
+                      "source_host": "mq-phase2l"
+                  }
+              },
+              "coverage": [],
+              "observations": []
+          }
+          key_id = "mq-phase2l-key"
+          secret = "phase2l-test-secret-0123456789abcdef"
+          now = 1789196400
+          payload = canonical_json_bytes(batch)
+          headers = signed_headers(payload, key_id, secret, str(now))
+          Path("/tmp/phase2l-vector.json").write_text(json.dumps({
+              "payload_utf8": payload.decode("utf-8"),
+              "headers": headers,
+              "key_id": key_id,
+              "secret": secret,
+              "source_id": batch["run"]["source"]["source_id"],
+              "now_epoch": now
+          }), encoding="utf-8")
+          PY
+
+      - name: Verify Python publisher to Worker verifier interoperability
+        run: node scripts/test-telemetry-ingest-verify.mjs /tmp/phase2l-vector.json
