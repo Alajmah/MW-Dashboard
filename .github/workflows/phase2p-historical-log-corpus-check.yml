@@ -1,0 +1,38 @@
+name: Phase 2P historical log corpus check
+
+on:
+  pull_request:
+    paths:
+      - "collectors/ibm-mq/mq-log-history-collector.sh"
+      - "collectors/ibm-mq/analyze_mq_log_history.py"
+      - "docs/phase-2p-historical-log-corpus.md"
+      - ".github/workflows/phase2p-historical-log-corpus-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "collectors/ibm-mq/mq-log-history-collector.sh"
+      - "collectors/ibm-mq/analyze_mq_log_history.py"
+      - "docs/phase-2p-historical-log-corpus.md"
+      - ".github/workflows/phase2p-historical-log-corpus-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check collector syntax
+        run: bash -n collectors/ibm-mq/mq-log-history-collector.sh
+      - name: Check analyzer syntax
+        run: python3 -m py_compile collectors/ibm-mq/analyze_mq_log_history.py
+      - name: Check collector help
+        run: bash collectors/ibm-mq/mq-log-history-collector.sh --help >/tmp/phase2p-help.txt
+      - name: Check analyzer help
+        run: python3 collectors/ibm-mq/analyze_mq_log_history.py --help >/tmp/phase2p-analyzer-help.txt
+      - name: Check demo boundary documentation
+        run: |
+          grep -Fq 'outside D1' docs/phase-2p-historical-log-corpus.md
+          grep -Fq 'no direct middleware connection' docs/phase-2p-historical-log-corpus.md
+          grep -Fq 'never enables MQ trace' docs/phase-2p-historical-log-corpus.md
