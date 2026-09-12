@@ -1,0 +1,113 @@
+name: Phase 2K trusted telemetry delivery check
+
+on:
+  pull_request:
+    paths:
+      - "collectors/ibm-mq/observer/**"
+      - "contracts/telemetry/v1/**"
+      - "docs/phase-2k-trusted-telemetry-delivery.md"
+      - ".github/workflows/phase2k-trusted-telemetry-delivery-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "collectors/ibm-mq/observer/**"
+      - "contracts/telemetry/v1/**"
+      - "docs/phase-2k-trusted-telemetry-delivery.md"
+      - ".github/workflows/phase2k-trusted-telemetry-delivery-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate telemetry JSON schema syntax
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for path in sorted(Path('contracts/telemetry/v1').glob('*.json')):
+              json.loads(path.read_text())
+              print('valid json:', path)
+          PY
+
+      - name: Python syntax
+        run: |
+          python -m py_compile \
+            collectors/ibm-mq/observer/osi_mq_observer.py \
+            collectors/ibm-mq/observer/telemetry_delivery.py \
+            collectors/ibm-mq/observer/telemetry_resolver.py \
+            collectors/ibm-mq/observer/test_osi_mq_observer.py \
+            collectors/ibm-mq/observer/test_telemetry_delivery.py \
+            collectors/ibm-mq/observer/test_telemetry_resolver.py
+
+      - name: Run observer, delivery, and resolver unit tests
+        working-directory: collectors/ibm-mq/observer
+        run: python -m unittest -v test_osi_mq_observer.py test_telemetry_delivery.py test_telemetry_resolver.py
+
+      - name: Prove publisher has no MQ or database authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=collectors/ibm-mq/observer/telemetry_delivery.py
+          ! grep -Eiq '\b(runmqsc|dspmq|D1Database|wrangler|ADMIN_IMPORT_TOKEN)\b' "$file"
+          grep -Fq 'X-OSI-Signature' "$file"
+          grep -Fq 'hmac.new' "$file"
+          grep -Fq 'telemetry endpoint must use HTTPS' "$file"
+          grep -Fq 'KEY_ID_RE' "$file"
+          grep -Fq 'MIN_SECRET_BYTES = 32' "$file"
+          grep -Fq '_NoRedirectHandler' "$file"
+
+      - name: Prove resolver rejects untrusted or inconsistent identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=collectors/ibm-mq/observer/telemetry_resolver.py
+          grep -Fq 'untrusted_canonical_id_supplied' "$file"
+          grep -Fq 'queue_manager_identity_mismatch' "$file"
+          grep -Fq 'ambiguous_scoped_identity' "$file"
+          grep -Fq 'canonical_identity_not_resolved' "$file"
+          grep -Fq 'source_identity_mismatch' "$file"
+          ! grep -Eiq '\b(INSERT|UPDATE|DELETE|D1Database|wrangler)\b' "$file"
+
+      - name: Prove observer remains collection-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=collectors/ibm-mq/observer/osi_mq_observer.py
+          grep -Fq '"network_publish": False' "$file"
+          ! grep -Eiq 'urllib|requests|httpx|aiohttp|X-OSI-Signature' "$file"
+
+      - name: Validate spool CLI smoke path
+        working-directory: collectors/ibm-mq/observer
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          python - <<'PY' > "$tmp/batch.json"
+          import json
+          print(json.dumps({
+            'schema_version':'osi.telemetry.batch/v1',
+            'run':{'run_id':'telemetry_ci'},
+            'coverage':[],
+            'observations':[]
+          }))
+          PY
+          first="$(python telemetry_delivery.py spool --input "$tmp/batch.json" --spool-dir "$tmp/spool")"
+          second="$(python telemetry_delivery.py spool --input "$tmp/batch.json" --spool-dir "$tmp/spool")"
+          echo "$first"
+          echo "$second"
+          python telemetry_delivery.py status --spool-dir "$tmp/spool"
+          python - <<'PY' "$first" "$second"
+          import json, sys
+          a=json.loads(sys.argv[1]); b=json.loads(sys.argv[2])
+          assert a['created'] is True
+          assert b['created'] is False
+          assert a['delivery_id'] == b['delivery_id']
+          assert a['spool']['pending'] == 1
+          PY

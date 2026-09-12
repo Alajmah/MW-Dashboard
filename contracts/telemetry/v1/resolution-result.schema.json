@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mw-dashboard.local/contracts/telemetry/v1/resolution-result.schema.json",
+  "title": "OSI Telemetry Resolution Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "resolved_at", "estate_revision_id", "source_batch", "coverage", "resolved_observations", "quarantine", "summary"],
+  "properties": {
+    "schema_version": {"const": "osi.telemetry.resolution/v1"},
+    "resolved_at": {"type": "string", "format": "date-time"},
+    "estate_revision_id": {"type": "string", "minLength": 1},
+    "source_batch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "sha256", "source_id"],
+      "properties": {
+        "run_id": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "coverage": {"type": "array", "maxItems": 100000},
+    "resolved_observations": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "required": ["observation_id", "entity", "observation_type", "observed_at", "value", "unit", "source", "quality", "resolution"],
+        "properties": {
+          "observation_id": {"type": "string", "pattern": "^tobs_[0-9a-f]{24}$"},
+          "entity": {
+            "type": "object",
+            "required": ["semantic_type", "display_name", "identity_hints", "canonical_entity_id"],
+            "properties": {
+              "semantic_type": {"type": "string", "minLength": 1},
+              "display_name": {"type": "string", "minLength": 1},
+              "identity_hints": {"type": "object"},
+              "canonical_entity_id": {"type": "string", "pattern": "^cent_[0-9a-f]{24}$"}
+            }
+          },
+          "observation_type": {"type": "string", "minLength": 1},
+          "observed_at": {"type": "string", "format": "date-time"},
+          "value": {"type": ["string", "number", "integer", "boolean"]},
+          "unit": {"type": "string", "minLength": 1},
+          "source": {"type": "object"},
+          "quality": {"type": "object"},
+          "dimensions": {"type": "object"},
+          "resolution": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["state", "method", "estate_revision_id"],
+            "properties": {
+              "state": {"const": "resolved"},
+              "method": {"enum": ["resolved_by_qmid", "resolved_by_name", "resolved_by_scoped_identity"]},
+              "estate_revision_id": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    },
+    "quarantine": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["observation_id", "reason", "candidate_entity_ids"],
+        "properties": {
+          "observation_id": {
+            "anyOf": [
+              {"type": "null"},
+              {"type": "string", "pattern": "^tobs_[0-9a-f]{24}$"}
+            ]
+          },
+          "semantic_type": {"type": ["string", "null"]},
+          "display_name": {"type": ["string", "null"]},
+          "reason": {"type": "string", "minLength": 1},
+          "candidate_entity_ids": {
+            "type": "array",
+            "items": {"type": "string", "pattern": "^cent_[0-9a-f]{24}$"}
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_observations", "resolved", "quarantined"],
+      "properties": {
+        "input_observations": {"type": "integer", "minimum": 0},
+        "resolved": {"type": "integer", "minimum": 0},
+        "quarantined": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}
