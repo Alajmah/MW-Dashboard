@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://osi.local/contracts/demo/v1/evidence-campaign.schema.json",
+  "title": "OSI Demo Evidence Campaign v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "tool_version",
+    "campaign_id",
+    "generated_at",
+    "source_root_name",
+    "operating_mode",
+    "database_written",
+    "artifacts",
+    "analyses",
+    "candidates",
+    "episodes",
+    "gaps",
+    "summary",
+    "qualification_notice"
+  ],
+  "properties": {
+    "schema_version": {"const": "osi.demo.evidence-campaign/v1"},
+    "tool_version": {"type": "string", "minLength": 1},
+    "campaign_id": {"type": "string", "pattern": "^campaign_[0-9a-f]{24}$"},
+    "generated_at": {"type": "string", "minLength": 1},
+    "source_root_name": {"type": "string"},
+    "operating_mode": {"const": "manual_osi_handoff"},
+    "database_written": {"const": false},
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["artifact_id", "product", "evidence_class", "path", "kind", "bytes", "file_count", "sha256", "modified_at", "source_metadata"],
+        "properties": {
+          "artifact_id": {"type": "string", "pattern": "^evid_[0-9a-f]{24}$"},
+          "product": {"enum": ["ibm_mq", "ibm_ace", "ibm_datapower"]},
+          "evidence_class": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "minLength": 1},
+          "kind": {"enum": ["file", "directory"]},
+          "bytes": {"type": "integer", "minimum": 0},
+          "file_count": {"type": "integer", "minimum": 0},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "modified_at": {"type": "string", "minLength": 1},
+          "source_metadata": {"type": "object"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "analyses": {"type": "array", "items": {"type": "object"}},
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "product", "analysis_path", "rank", "state", "required_corroboration"],
+        "properties": {
+          "candidate_id": {"type": "string", "pattern": "^cand_[0-9a-f]{24}$"},
+          "product": {"type": "string"},
+          "analysis_path": {"type": "string"},
+          "rank": {"type": "integer", "minimum": 1},
+          "state": {"const": "unreviewed"},
+          "required_corroboration": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    },
+    "episodes": {"type": "array", "items": {"type": "object"}},
+    "gaps": {"type": "array", "items": {"type": "object"}},
+    "summary": {
+      "type": "object",
+      "required": ["artifact_count", "artifact_bytes", "analysis_count", "candidate_count", "product_artifact_counts", "evidence_class_counts", "qualified_demo_episode_count"],
+      "properties": {
+        "artifact_count": {"type": "integer", "minimum": 0},
+        "artifact_bytes": {"type": "integer", "minimum": 0},
+        "analysis_count": {"type": "integer", "minimum": 0},
+        "candidate_count": {"type": "integer", "minimum": 0},
+        "product_artifact_counts": {"type": "object"},
+        "evidence_class_counts": {"type": "object"},
+        "qualified_demo_episode_count": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "qualification_notice": {"type": "string", "minLength": 1}
+  }
+}
