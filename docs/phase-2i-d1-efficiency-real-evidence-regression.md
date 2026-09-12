@@ -7,7 +7,7 @@ Phase 2I uses the Cloudflare D1 quota interruption as an engineering signal rath
 This phase has three goals:
 
 1. reduce avoidable D1 reads in deployment and known hot investigation paths;
-2. establish a repeatable D1 query-plan guard for the new entity-scoped impact lookup;
+2. establish repeatable D1 query-plan guards for selective canonical reads;
 3. convert a real five-sample IBM MQ capture shape into a sanitized public regression fixture without publishing production identifiers.
 
 It does **not** change MQ configuration, enable monitoring, consume event/statistics queues, read message payloads, or introduce a new monitoring backend.
@@ -15,6 +15,73 @@ It does **not** change MQ configuration, enable monitoring, consume event/statis
 ## D1 row-read audit
 
 The audit focused on the read paths used by Overview, Objects, operational findings, Queue Investigation, Routes and Phase 2H Impact.
+
+The Cloudflare account screenshot captured during the quota incident showed 6.21M D1 rows read against a 5M daily free-tier limit, while writes and storage were well below their limits. That establishes a row-read exhaustion event, but the account-level screenshot does **not** identify which endpoint or SQL statement caused each read. The rankings below are therefore code-grounded amplification mechanisms and query-plan findings, not an assertion of endpoint-level production causality.
+
+### Confirmed client amplification: Overview compatibility layers
+
+The Overview is currently composed by three operational UI layers that historically refreshed independently:
+
+- `operational-intelligence.js` requested operations status, OPEN findings, ACKNOWLEDGED findings, and four severity-count variants — seven D1-backed requests per refresh;
+- `phase2d-evidence-semantics.js` separately requested operations status, latest observation, OPEN informational findings and ACKNOWLEDGED informational findings — four more requests;
+- `phase2e-triage-compression.js` separately requested all OPEN findings, all ACKNOWLEDGED findings, latest observation and canonical-estate summary — four more requests.
+
+That is at least 15 D1-backed HTTP requests in an uncoordinated Overview refresh cycle before pagination, navigation-triggered refreshes, or mutation-observer retries are counted. Several requests ask for overlapping current-state facts.
+
+Phase 2I installs `phase2i-overview-read-broker.js` before those compatibility layers. It does not change the API contracts. Instead it:
+
+- coalesces identical operations-status requests for 30 seconds;
+- coalesces latest-observation requests for 30 seconds;
+- loads one complete current finding snapshot per lifecycle status (`OPEN` / `ACKNOWLEDGED`) for 30 seconds and answers Overview severity/count/page variants from that same snapshot;
+- caches canonical-estate summary for five minutes because topology revisions change through explicit imports rather than once per minute;
+- invalidates all cached current-state projections on any `/api/v2/` mutation.
+
+With the present finding volume fitting within one 200-item page per lifecycle state, the common Overview refresh shape falls from at least 15 backend reads to approximately five unique backend reads: operations status, OPEN findings, ACKNOWLEDGED findings, latest observation, and (when its five-minute cache expires) canonical-estate summary. This is a request-amplification reduction, not a promise about Cloudflare billable row reads; remote D1 must still be measured after quota recovery.
+
+CI runs `test-phase2i-overview-read-broker.mjs` against a mocked backend and proves concurrent status reads, finding filter/count variants, latest-observation reads and estate-summary reads are coalesced while API mutations invalidate the cache.
+
+### Confirmed backend amplification: canonical-estate summary
+
+`GET /api/v2/estate/current/summary` previously scanned the current `semantic_estate_entity` projection three separate times:
+
+1. counts grouped by `semantic_type`;
+2. counts grouped by `identity_state`;
+3. `COUNT(*)` for `source_count > 1`.
+
+With the current estate at 924 entities, that SQL shape repeatedly walks the same bounded entity set even though all three results can be derived from one grouped pass. Phase 2I replaces those three entity queries with one rollup grouped by `(semantic_type, identity_state)` and derives the per-type, per-state and multi-source totals in the Worker. The unresolved-state rollup remains a separate query over `semantic_estate_unresolved`.
+
+The response contract is unchanged and the sanitized regression estate verifies exact summary counts.
+
+### Confirmed planner obstruction: optional-filter OR predicates
+
+Canonical list APIs previously encoded every optional filter as expressions such as:
+
+```sql
+(? = '' OR semantic_type = ?)
+```
+
+That is convenient for one prepared SQL shape but makes selective intent less explicit to SQLite/D1. Phase 2I now builds exact predicates only for filters actually supplied. Examples become:
+
+```sql
+WHERE estate_revision_id = ? AND semantic_type = ?
+```
+
+or:
+
+```sql
+WHERE estate_revision_id = ? AND source_entity_id = ?
+```
+
+The same approach is applied to entity, relation and unresolved list readers. The contains-search predicate is added only when `q` is non-empty.
+
+Local `EXPLAIN QUERY PLAN` CI guards require filtered reads to retain existing selective access paths for:
+
+- entity semantic type, through one of the existing indexes whose prefix is `(estate_revision_id, semantic_type)`;
+- relation source entity;
+- relation target entity;
+- Phase 2I unresolved source entity.
+
+The ordered unresolved-state list is logged but deliberately does not force a specific index. Local SQLite currently prefers the new unresolved-source covering index for that exact `ORDER BY` shape even though `state` is filtered. The current unresolved set is small, so Phase 2I does not add or force another index without remote row-read evidence.
 
 ### Good existing access paths
 
@@ -54,6 +121,15 @@ Migration `0007_d1_read_efficiency.sql` adds:
 ```
 
 The Phase 2I CI check uses local D1 `EXPLAIN QUERY PLAN` and fails unless the entity-scoped unresolved lookup uses `idx_semantic_estate_unresolved_source`.
+
+### Remaining high-priority readers to measure remotely
+
+Two operational SQL families deserve measurement after quota reset because code inspection shows they can amplify reads as history and source count grow:
+
+1. `GET /api/v2/operations/status` performs separate counts over current evaluations, current distinct findings, current observations, and current coverage gaps;
+2. `GET /api/v2/findings/current` uses a ranked window over current finding occurrences plus a separate distinct-count query. Existing indexes are sensible, but join order and window-work cost need remote evidence before further schema changes are justified.
+
+The Overview broker reduces how often these readers are called. Phase 2I deliberately does not add speculative operational indexes without measured query-plan or remote row-read evidence.
 
 ### Intentional bounded scans / future work
 
@@ -110,14 +186,16 @@ The fixture explicitly preserves OSI semantic boundaries: output-open access is 
 The Phase 2I workflow performs only local/CI operations:
 
 1. validates that the sanitized fixture contains no known production tokens or IPv4 addresses;
-2. applies all D1 migrations to local D1;
-3. checks the entity-scoped unresolved query plan;
-4. seeds the sanitized canonical estate, operational observations, findings and unresolved destination boundary;
-5. starts the Worker locally;
-6. verifies 20 persisted queue observations (four metrics × five samples);
-7. verifies the two current findings for the queue;
-8. verifies Phase 2H Impact classifies the runtime process as upstream `runtime_access`, keeps downstream continuation unresolved, and does not assert application/service impact;
-9. verifies passive route tracing from the runtime process to the queue while retaining the runtime-access semantic warning.
+2. verifies the Overview read broker coalesces overlapping current-state requests and invalidates on mutation;
+3. applies all D1 migrations to local D1;
+4. checks entity-source unresolved and selective entity/relation query plans while logging the ordered unresolved-state plan for evidence;
+5. seeds the sanitized canonical estate, operational observations, findings and unresolved destination boundary;
+6. starts the Worker locally;
+7. verifies the one-pass canonical summary and filtered canonical list response contracts;
+8. verifies 20 persisted queue observations (four metrics × five samples);
+9. verifies the two current findings for the queue;
+10. verifies Phase 2H Impact classifies the runtime process as upstream `runtime_access`, keeps downstream continuation unresolved, and does not assert application/service impact;
+11. verifies passive route tracing from the runtime process to the queue while retaining the runtime-access semantic warning.
 
 This gives the project a realistic regression shape without depending on production D1 or publishing sensitive estate data.
 

@@ -7,9 +7,12 @@ on:
       - "fixtures/regression/**"
       - "scripts/seed-real-mq-regression-ci.sql"
       - "scripts/test-real-mq-regression.mjs"
+      - "scripts/test-phase2i-overview-read-broker.mjs"
       - "docs/phase-2i-d1-efficiency-real-evidence-regression.md"
       - ".github/workflows/deploy-cloudflare.yml"
       - ".github/workflows/phase2i-d1-efficiency-regression-check.yml"
+      - "public/phase2i-overview-read-broker.js"
+      - "public/shell.js"
       - "src/semantic-impact.ts"
       - "src/semantic-routes.ts"
       - "src/operational-findings.ts"
@@ -22,9 +25,12 @@ on:
       - "fixtures/regression/**"
       - "scripts/seed-real-mq-regression-ci.sql"
       - "scripts/test-real-mq-regression.mjs"
+      - "scripts/test-phase2i-overview-read-broker.mjs"
       - "docs/phase-2i-d1-efficiency-real-evidence-regression.md"
       - ".github/workflows/deploy-cloudflare.yml"
       - ".github/workflows/phase2i-d1-efficiency-regression-check.yml"
+      - "public/phase2i-overview-read-broker.js"
+      - "public/shell.js"
       - "src/semantic-impact.ts"
       - "src/semantic-routes.ts"
       - "src/operational-findings.ts"
@@ -49,6 +55,9 @@ jobs:
       - name: Validate sanitized real-shaped fixture
         run: node scripts/test-real-mq-regression.mjs
 
+      - name: Verify Overview read broker coalesces duplicate current-state reads
+        run: node scripts/test-phase2i-overview-read-broker.mjs
+
       - name: Verify production identifiers are absent from public regression assets
         shell: bash
         run: |
@@ -67,6 +76,31 @@ jobs:
           plan="$(npx wrangler d1 execute DB --local --command="EXPLAIN QUERY PLAN SELECT unresolved_id, source_entity_id, semantic_type FROM semantic_estate_unresolved WHERE estate_revision_id = 'estate-regression-realshape-001' AND source_entity_id = 'cent_111111111111111111111111' ORDER BY state, semantic_type, unresolved_id")"
           printf '%s\n' "$plan"
           printf '%s\n' "$plan" | grep -Fq 'idx_semantic_estate_unresolved_source'
+
+      - name: Verify filtered canonical reads retain selective indexes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          entity_plan="$(npx wrangler d1 execute DB --local --command="EXPLAIN QUERY PLAN SELECT entity_id, semantic_type, display_name FROM semantic_estate_entity WHERE estate_revision_id = 'estate-regression-realshape-001' AND semantic_type = 'mq.queue' ORDER BY semantic_type, lower(COALESCE(display_name,'')), entity_id")"
+          printf '%s\n' "$entity_plan"
+          printf '%s\n' "$entity_plan" | grep -Eq 'idx_semantic_estate_entity_(type|identity)'
+
+          source_plan="$(npx wrangler d1 execute DB --local --command="EXPLAIN QUERY PLAN SELECT relation_id FROM semantic_estate_relation WHERE estate_revision_id = 'estate-regression-realshape-001' AND source_entity_id = 'cent_111111111111111111111111' ORDER BY semantic_type, source_entity_id, target_entity_id, relation_id")"
+          printf '%s\n' "$source_plan"
+          printf '%s\n' "$source_plan" | grep -Fq 'idx_semantic_estate_relation_source'
+
+          target_plan="$(npx wrangler d1 execute DB --local --command="EXPLAIN QUERY PLAN SELECT relation_id FROM semantic_estate_relation WHERE estate_revision_id = 'estate-regression-realshape-001' AND target_entity_id = 'cent_111111111111111111111111' ORDER BY semantic_type, source_entity_id, target_entity_id, relation_id")"
+          printf '%s\n' "$target_plan"
+          printf '%s\n' "$target_plan" | grep -Fq 'idx_semantic_estate_relation_target'
+
+          # Keep the ordered state-filter plan visible but do not force a specific
+          # index. Local SQLite currently prefers the new unresolved-source
+          # covering index for this ORDER BY shape even though state is filtered.
+          # The current unresolved set is small; remote row-read evidence should
+          # decide whether a dedicated ordered state path is worth another index.
+          unresolved_state_plan="$(npx wrangler d1 execute DB --local --command="EXPLAIN QUERY PLAN SELECT unresolved_id FROM semantic_estate_unresolved WHERE estate_revision_id = 'estate-regression-realshape-001' AND state = 'dynamic' ORDER BY state, semantic_type, source_entity_id, unresolved_id")"
+          printf '%s\n' "$unresolved_state_plan"
 
       - name: Seed sanitized MQ regression estate
         run: npx wrangler d1 execute DB --local --file=scripts/seed-real-mq-regression-ci.sql
@@ -91,6 +125,18 @@ jobs:
         run: |
           set -euo pipefail
 
+          summary="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/estate/current/summary')"
+          printf '%s\n' "$summary" > /tmp/phase2i-summary.json
+
+          filtered_entities="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/estate/current/entities?semantic_type=mq.queue&limit=100')"
+          printf '%s\n' "$filtered_entities" > /tmp/phase2i-filtered-entities.json
+
+          filtered_relations="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/estate/current/relations?source_entity_id=cent_111111111111111111111111&limit=100')"
+          printf '%s\n' "$filtered_relations" > /tmp/phase2i-filtered-relations.json
+
+          filtered_unresolved="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/estate/current/unresolved?state=dynamic&limit=100')"
+          printf '%s\n' "$filtered_unresolved" > /tmp/phase2i-filtered-unresolved.json
+
           entity="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/estate/current/entities/cent_111111111111111111111111?relation_limit=20')"
           printf '%s\n' "$entity" > /tmp/phase2i-entity.json
 
@@ -108,6 +154,28 @@ jobs:
 
           python - <<'PY'
           import json
+
+          summary=json.load(open('/tmp/phase2i-summary.json'))
+          assert summary['counts']['entities'] == 6
+          assert summary['counts']['relations'] == 5
+          assert summary['counts']['unresolved'] == 1
+          assert summary['counts']['multi_source_entities'] == 0
+          assert summary['entities_by_type']['mq.queue'] == 1
+          assert summary['entities_by_type']['mq.queue_manager'] == 2
+          assert summary['identity_states'] == {'resolved': 6}
+          assert summary['unresolved_by_state'] == {'dynamic': 1}
+
+          filtered_entities=json.load(open('/tmp/phase2i-filtered-entities.json'))
+          assert filtered_entities['page']['total'] == 1
+          assert [row['display_name'] for row in filtered_entities['entities']] == ['Q.REGRESSION.OUT']
+
+          filtered_relations=json.load(open('/tmp/phase2i-filtered-relations.json'))
+          assert filtered_relations['page']['total'] == 1
+          assert filtered_relations['relations'][0]['semantic_type'] == 'mq.cluster_discovers'
+
+          filtered_unresolved=json.load(open('/tmp/phase2i-filtered-unresolved.json'))
+          assert filtered_unresolved['page']['total'] == 1
+          assert filtered_unresolved['unresolved'][0]['state'] == 'dynamic'
 
           entity=json.load(open('/tmp/phase2i-entity.json'))
           assert entity['entity']['display_name'] == 'Q.REGRESSION.OUT'
