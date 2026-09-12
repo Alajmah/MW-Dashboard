@@ -1,0 +1,72 @@
+name: Phase 2O demo manual mode check
+
+on:
+  pull_request:
+    paths:
+      - "public/shell.js"
+      - "public/phase2o-demo-manual-mode.js"
+      - "public/phase2o-demo-manual-mode.css"
+      - "docs/phase-2o-demo-manual-osi-evidence-mode.md"
+      - ".github/workflows/phase2o-demo-manual-mode-check.yml"
+      - "wrangler.jsonc"
+      - ".github/workflows/deploy-cloudflare.yml"
+  push:
+    branches: [main]
+    paths:
+      - "public/shell.js"
+      - "public/phase2o-demo-manual-mode.js"
+      - "public/phase2o-demo-manual-mode.css"
+      - "docs/phase-2o-demo-manual-osi-evidence-mode.md"
+      - ".github/workflows/phase2o-demo-manual-mode-check.yml"
+      - "wrangler.jsonc"
+      - ".github/workflows/deploy-cloudflare.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check Worker
+        run: npm run check
+
+      - name: Syntax check Phase 2O browser projection
+        run: node --check public/phase2o-demo-manual-mode.js
+
+      - name: Verify manual demo operating contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'Manual OSI evidence handoff' public/shell.js
+          grep -Fq 'Manual OSI handoff' public/phase2o-demo-manual-mode.js
+          grep -Fq 'osi.findings.evaluation/v1' public/phase2o-demo-manual-mode.js
+          grep -Fq 'no direct middleware connection' docs/phase-2o-demo-manual-osi-evidence-mode.md
+          grep -Fq 'Evidence age is always derived from stored evidence timestamps.' docs/phase-2o-demo-manual-osi-evidence-mode.md
+
+      - name: Verify continuous telemetry remains disabled for demo
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Eq 'TELEMETRY_INGEST_ENABLED[^\n]*true' wrangler.jsonc .github/workflows/deploy-cloudflare.yml; then
+            echo 'Continuous telemetry must remain disabled during demo mode.' >&2
+            exit 1
+          fi
+          grep -Fq 'Direct telemetry ingress' public/phase2o-demo-manual-mode.js
+          grep -Fq 'Phase 2N is retained as future infrastructure.' docs/phase-2o-demo-manual-osi-evidence-mode.md
+
+      - name: Verify Phase 2O is UI and operating-contract only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" > /tmp/phase2o-files.txt || true
+          if grep -Eq '^(migrations/|src/telemetry-ingest|collectors/ibm-mq/observer/)' /tmp/phase2o-files.txt; then
+            echo 'Phase 2O must not add a migration, telemetry ingest backend change, or observer service change.' >&2
+            cat /tmp/phase2o-files.txt >&2
+            exit 1
+          fi
