@@ -42,8 +42,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ! grep -R "TELEMETRY_INGEST_ENABLED.*true" wrangler.jsonc .github/workflows/deploy-cloudflare.yml
-          ! grep -R "phase2n-test-secret" src/ wrangler.jsonc .github/workflows/
+          if grep -R "TELEMETRY_INGEST_ENABLED.*true" wrangler.jsonc .github/workflows/deploy-cloudflare.yml; then
+            echo "Phase 2N must not enable production telemetry ingestion" >&2
+            exit 1
+          fi
           grep -Fq 'TELEMETRY_INGEST_KEYS_JSON' src/telemetry-ingest.ts
           grep -Fq 'dark_launch_disabled' src/telemetry-ingest.ts
           grep -Fq '"ingress_enabled": false' .github/workflows/deploy-cloudflare.yml
@@ -56,7 +58,10 @@ jobs:
           grep -Fq 'CREATE TABLE IF NOT EXISTS telemetry_source_state' migrations/0008_telemetry_ingest.sql
           grep -Fq 'CREATE TABLE IF NOT EXISTS telemetry_latest_observation' migrations/0008_telemetry_ingest.sql
           grep -Fq 'CREATE TABLE IF NOT EXISTS telemetry_quarantine' migrations/0008_telemetry_ingest.sql
-          ! grep -Eq 'CREATE TABLE.*(history|timeseries|time_series|raw_observation)' migrations/0008_telemetry_ingest.sql
+          if grep -Eq 'CREATE TABLE.*(history|timeseries|time_series|raw_observation)' migrations/0008_telemetry_ingest.sql; then
+            echo "Phase 2N must not introduce raw telemetry history in D1" >&2
+            exit 1
+          fi
 
       - name: Run authenticated local ingestion smoke
         shell: bash
