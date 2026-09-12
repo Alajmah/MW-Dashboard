@@ -44,7 +44,7 @@ def identity_snapshot(queue_count: int) -> dict:
     return {
         "schema_version": "osi.telemetry.identity-snapshot/v1",
         "estate_revision_id": "estate_phase2m_load",
-        "generated_at": "2026-09-11T08:00:00Z",
+        "built_at": "2026-09-12T08:00:00Z",
         "entities": entities,
     }
 
@@ -66,7 +66,7 @@ def batch(batch_index: int, observation_count: int, known_queue_count: int) -> d
                 },
             },
             "observation_type": "mq.queue.depth.current",
-            "observed_at": f"2026-09-11T08:{batch_index % 60:02d}:00Z",
+            "observed_at": f"2026-09-12T08:{batch_index % 60:02d}:00Z",
             "value": i,
             "unit": "messages",
             "source": {
@@ -86,10 +86,10 @@ def batch(batch_index: int, observation_count: int, known_queue_count: int) -> d
         "run": {
             "run_id": f"telemetry_phase2m_{batch_index:04d}",
             "observer": "osi-mq-observer",
-            "observer_version": "0.1.0",
+            "observer_version": "0.2.0",
             "profile": "baseline",
-            "started_at": "2026-09-11T08:00:00Z",
-            "completed_at": "2026-09-11T08:00:01Z",
+            "started_at": "2026-09-12T08:00:00Z",
+            "completed_at": "2026-09-12T08:00:01Z",
             "sample_count": 1,
             "sample_interval_seconds": 60,
             "source": {"kind": "ibm_mq_host", "source_id": "mq-load.example", "source_host": "mq-load"},
