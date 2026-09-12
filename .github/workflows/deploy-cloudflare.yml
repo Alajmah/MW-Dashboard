@@ -155,3 +155,13 @@ jobs:
           printf '%s\n' "$response"
           printf '%s\n' "$response" | grep -Fq '"database_ready": true'
           printf '%s\n' "$response" | grep -Fq '"schema_version": "osi.operations.read/v1"'
+
+      - name: Smoke test telemetry dark-launch status
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 8 --retry-all-errors --retry-delay 2 https://mw-dashboard.saeedm309.workers.dev/api/v2/telemetry/status)"
+          printf '%s\n' "$response"
+          printf '%s\n' "$response" | grep -Fq '"database_ready": true'
+          printf '%s\n' "$response" | grep -Fq '"ingress_enabled": false'
+          printf '%s\n' "$response" | grep -Fq '"mode": "dark_launch_disabled"'
