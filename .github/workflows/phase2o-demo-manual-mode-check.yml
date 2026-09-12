@@ -29,6 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies
         run: npm install
@@ -46,7 +48,7 @@ jobs:
           grep -Fq 'Manual OSI evidence handoff' public/shell.js
           grep -Fq 'Manual OSI handoff' public/phase2o-demo-manual-mode.js
           grep -Fq 'osi.findings.evaluation/v1' public/phase2o-demo-manual-mode.js
-          grep -Fq 'no direct middleware connection' docs/phase-2o-demo-manual-osi-evidence-mode.md
+          grep -Fq 'does not require or assume a direct network connection' docs/phase-2o-demo-manual-osi-evidence-mode.md
           grep -Fq 'Evidence age is always derived from stored evidence timestamps.' docs/phase-2o-demo-manual-osi-evidence-mode.md
 
       - name: Verify continuous telemetry remains disabled for demo
@@ -61,10 +63,14 @@ jobs:
           grep -Fq 'Phase 2N is retained as future infrastructure.' docs/phase-2o-demo-manual-osi-evidence-mode.md
 
       - name: Verify Phase 2O is UI and operating-contract only
+        if: github.event_name == 'pull_request'
         shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" > /tmp/phase2o-files.txt || true
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > /tmp/phase2o-files.txt
           if grep -Eq '^(migrations/|src/telemetry-ingest|collectors/ibm-mq/observer/)' /tmp/phase2o-files.txt; then
             echo 'Phase 2O must not add a migration, telemetry ingest backend change, or observer service change.' >&2
             cat /tmp/phase2o-files.txt >&2
