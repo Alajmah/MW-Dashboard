@@ -1,0 +1,76 @@
+name: Phase 2M security and D1 guardrails
+
+on:
+  pull_request:
+    paths:
+      - "package.json"
+      - "scripts/check-npm-audit.mjs"
+      - "scripts/phase2m-d1-budget.mjs"
+      - "design/telemetry/phase2m-telemetry-persistence.sql"
+      - "collectors/ibm-mq/observer/test_phase2m_telemetry_load.py"
+      - "docs/phase-2m-security-d1-guardrails.md"
+      - ".github/workflows/phase2m-security-d1-budget-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "package.json"
+      - "scripts/check-npm-audit.mjs"
+      - "scripts/phase2m-d1-budget.mjs"
+      - "design/telemetry/phase2m-telemetry-persistence.sql"
+      - "collectors/ibm-mq/observer/test_phase2m_telemetry_load.py"
+      - "docs/phase-2m-security-d1-guardrails.md"
+      - ".github/workflows/phase2m-security-d1-budget-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check Worker
+        run: npm run check
+
+      - name: Audit npm dependency graph
+        shell: bash
+        run: |
+          set +e
+          npm audit --json > /tmp/phase2m-npm-audit.json
+          audit_rc=$?
+          set -e
+          node scripts/check-npm-audit.mjs /tmp/phase2m-npm-audit.json
+          test "$audit_rc" -eq 0
+
+      - name: Prove this offline slice adds no production route or migration
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "${BASE_SHA:-}" ]; then
+            changed="$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA")"
+            printf '%s\n' "$changed"
+            if printf '%s\n' "$changed" | grep -Eq '^(migrations/|src/index\.ts$|wrangler\.jsonc$)'; then
+              echo "Phase 2M must not add a production route, binding, or deployable migration" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Validate candidate telemetry persistence schema locally
+        run: node scripts/phase2m-d1-budget.mjs
+
+      - name: Run telemetry chain load regression
+        env:
+          PYTHONPATH: collectors/ibm-mq/observer
+        run: python3 -m unittest -v collectors/ibm-mq/observer/test_phase2m_telemetry_load.py
+
+      - name: Prove candidate schema remains outside deployable migrations
+        run: |
+          test -f design/telemetry/phase2m-telemetry-persistence.sql
+          test ! -e migrations/0008_telemetry.sql
+          ! grep -R "telemetry_delivery_ledger" migrations/
