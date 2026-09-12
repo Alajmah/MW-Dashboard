@@ -1,0 +1,103 @@
+name: Phase 2R diagnostic index check
+
+on:
+  pull_request:
+    paths:
+      - 'collectors/ibm-mq/mq-diagnostic-header-index.py'
+      - 'scripts/build-phase2r-diagnostic-kit.sh'
+      - 'docs/phase-2r-diagnostic-index.md'
+      - '.github/workflows/phase2r-diagnostic-index-check.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'collectors/ibm-mq/mq-diagnostic-header-index.py'
+      - 'scripts/build-phase2r-diagnostic-kit.sh'
+      - 'docs/phase-2r-diagnostic-index.md'
+      - '.github/workflows/phase2r-diagnostic-index-check.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Syntax check
+        run: |
+          python3 -m py_compile collectors/ibm-mq/mq-diagnostic-header-index.py
+          bash -n scripts/build-phase2r-diagnostic-kit.sh
+      - name: Test first and all report modes
+        run: |
+          set -euo pipefail
+          ROOT="$(mktemp -d)"
+          OUT="$(mktemp -d)"
+          mkdir -p "$ROOT/errors"
+          cat > "$ROOT/errors/AMQ00001.0.FDC" <<'EOF'
+          +-----------------------------------------------------------------------------+
+          | IBM MQ First Failure Symptom Report                                         |
+          | Date/Time         :- Tue January 02 2024 03:04:05 +00                       |
+          | UTC Time          :- 1704164645.000000                                      |
+          | Host Name         :- mq-host.example                                         |
+          | LVLS              :- 9.4.0.0                                                 |
+          | Probe Id          :- XY123456                                                |
+          | Component         :- exampleComponent                                        |
+          | Program Name      :- amqexample                                              |
+          | QueueManager      :- QM_DEMO                                                  |
+          | Last ObjectName   :- DEMO.QUEUE                                               |
+          | Major Errorcode   :- example_error                                            |
+          | Minor Errorcode   :- OK                                                       |
+          | Probe Type        :- MSGAMQ9999                                               |
+          | Probe Severity    :- 2                                                        |
+          | Probe Description :- Example diagnostic event.                                |
+          | Comment1          :- DEMO.QUEUE                                               |
+          +-----------------------------------------------------------------------------+
+          body not copied to output
+          +-----------------------------------------------------------------------------+
+          | IBM MQ First Failure Symptom Report                                         |
+          | Date/Time         :- Tue January 02 2024 03:05:05 +00                       |
+          | UTC Time          :- 1704164705.000000                                      |
+          | Host Name         :- mq-host.example                                         |
+          | LVLS              :- 9.4.0.0                                                 |
+          | Probe Id          :- XY123456                                                |
+          | Component         :- exampleComponent                                        |
+          | Program Name      :- amqexample                                              |
+          | QueueManager      :- QM_DEMO                                                  |
+          | Last ObjectName   :- DEMO.QUEUE                                               |
+          | Major Errorcode   :- example_error                                            |
+          | Minor Errorcode   :- OK                                                       |
+          | Probe Type        :- MSGAMQ9999                                               |
+          | Probe Severity    :- 2                                                        |
+          | Probe Description :- Example diagnostic event.                                |
+          | Comment1          :- DEMO.QUEUE                                               |
+          +-----------------------------------------------------------------------------+
+          EOF
+          python3 collectors/ibm-mq/mq-diagnostic-header-index.py --root "$ROOT" --output-dir "$OUT"
+          FIRST="$(find "$OUT" -name '*.tar.gz' -print -quit)"
+          tar -xOzf "$FIRST" --wildcards '*/summary.json' > "$OUT/first.json"
+          python3 - "$OUT/first.json" <<'PY'
+          import json, sys
+          d=json.load(open(sys.argv[1]))
+          assert d['reports_indexed'] == 1, d
+          assert d['raw_diagnostic_bodies_copied'] is False
+          assert d['database_written'] is False
+          PY
+          rm -f "$OUT"/*.tar.gz
+          python3 collectors/ibm-mq/mq-diagnostic-header-index.py --root "$ROOT" --output-dir "$OUT" --all-reports
+          ALL="$(find "$OUT" -name '*.tar.gz' -print -quit)"
+          tar -xOzf "$ALL" --wildcards '*/summary.json' > "$OUT/all.json"
+          python3 - "$OUT/all.json" <<'PY'
+          import json, sys
+          d=json.load(open(sys.argv[1]))
+          assert d['reports_indexed'] == 2, d
+          assert d['unique_signatures'] == 1, d
+          assert d['bytes_read_total'] == d['source_bytes_total'], d
+          PY
+      - name: Build portable kit
+        run: |
+          set -euo pipefail
+          ARCHIVE="$(bash scripts/build-phase2r-diagnostic-kit.sh ./dist)"
+          test -s "$ARCHIVE"
+          tar -tzf "$ARCHIVE" | grep -q 'mq-diagnostic-header-index.py'
+          tar -tzf "$ARCHIVE" | grep -q 'SHA256SUMS'
+      - name: Guard offline boundary
+        run: |
+          set -euo pipefail
+          ! grep -Eri 'D1\.prepare|/api/v2/telemetry/ingest|runmqsc|RESET QSTATS' collectors/ibm-mq/mq-diagnostic-header-index.py
