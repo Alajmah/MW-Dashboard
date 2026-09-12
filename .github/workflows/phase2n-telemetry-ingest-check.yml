@@ -1,0 +1,68 @@
+name: Phase 2N telemetry ingest check
+
+on:
+  pull_request:
+    paths:
+      - "migrations/0008_telemetry_ingest.sql"
+      - "src/bootstrap.ts"
+      - "src/telemetry-ingest.ts"
+      - "src/telemetry-ingest-verify.ts"
+      - "scripts/phase2n-local-ingest-smoke.sh"
+      - "docs/phase-2n-trusted-telemetry-ingest-dark-launch.md"
+      - ".github/workflows/phase2n-telemetry-ingest-check.yml"
+      - ".github/workflows/deploy-cloudflare.yml"
+  push:
+    branches: [main]
+    paths:
+      - "migrations/0008_telemetry_ingest.sql"
+      - "src/bootstrap.ts"
+      - "src/telemetry-ingest.ts"
+      - "src/telemetry-ingest-verify.ts"
+      - "scripts/phase2n-local-ingest-smoke.sh"
+      - "docs/phase-2n-trusted-telemetry-ingest-dark-launch.md"
+      - ".github/workflows/phase2n-telemetry-ingest-check.yml"
+      - ".github/workflows/deploy-cloudflare.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check Worker
+        run: npm run check
+
+      - name: Verify production remains dark by default
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R "TELEMETRY_INGEST_ENABLED.*true" wrangler.jsonc .github/workflows/deploy-cloudflare.yml; then
+            echo "Phase 2N must not enable production telemetry ingestion" >&2
+            exit 1
+          fi
+          grep -Fq 'TELEMETRY_INGEST_KEYS_JSON' src/telemetry-ingest.ts
+          grep -Fq 'dark_launch_disabled' src/telemetry-ingest.ts
+          grep -Fq '"ingress_enabled": false' .github/workflows/deploy-cloudflare.yml
+
+      - name: Verify Phase 2N migration shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'CREATE TABLE IF NOT EXISTS telemetry_delivery_ledger' migrations/0008_telemetry_ingest.sql
+          grep -Fq 'CREATE TABLE IF NOT EXISTS telemetry_source_state' migrations/0008_telemetry_ingest.sql
+          grep -Fq 'CREATE TABLE IF NOT EXISTS telemetry_latest_observation' migrations/0008_telemetry_ingest.sql
+          grep -Fq 'CREATE TABLE IF NOT EXISTS telemetry_quarantine' migrations/0008_telemetry_ingest.sql
+          if grep -Eq 'CREATE TABLE.*(history|timeseries|time_series|raw_observation)' migrations/0008_telemetry_ingest.sql; then
+            echo "Phase 2N must not introduce raw telemetry history in D1" >&2
+            exit 1
+          fi
+
+      - name: Run authenticated local ingestion smoke
+        shell: bash
+        run: bash scripts/phase2n-local-ingest-smoke.sh
