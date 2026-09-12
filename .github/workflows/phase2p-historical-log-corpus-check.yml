@@ -5,6 +5,8 @@ on:
     paths:
       - "collectors/ibm-mq/mq-log-history-collector.sh"
       - "collectors/ibm-mq/analyze_mq_log_history.py"
+      - "collectors/ibm-ace/ace-log-history-collector.sh"
+      - "collectors/analyze_enterprise_log_history.py"
       - "docs/phase-2p-historical-log-corpus.md"
       - ".github/workflows/phase2p-historical-log-corpus-check.yml"
   push:
@@ -12,6 +14,8 @@ on:
     paths:
       - "collectors/ibm-mq/mq-log-history-collector.sh"
       - "collectors/ibm-mq/analyze_mq_log_history.py"
+      - "collectors/ibm-ace/ace-log-history-collector.sh"
+      - "collectors/analyze_enterprise_log_history.py"
       - "docs/phase-2p-historical-log-corpus.md"
       - ".github/workflows/phase2p-historical-log-corpus-check.yml"
 
@@ -23,16 +27,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Check collector syntax
-        run: bash -n collectors/ibm-mq/mq-log-history-collector.sh
-      - name: Check analyzer syntax
-        run: python3 -m py_compile collectors/ibm-mq/analyze_mq_log_history.py
-      - name: Check collector help
-        run: bash collectors/ibm-mq/mq-log-history-collector.sh --help >/tmp/phase2p-help.txt
-      - name: Check analyzer help
-        run: python3 collectors/ibm-mq/analyze_mq_log_history.py --help >/tmp/phase2p-analyzer-help.txt
+      - name: Check shell collectors
+        run: |
+          bash -n collectors/ibm-mq/mq-log-history-collector.sh
+          bash -n collectors/ibm-ace/ace-log-history-collector.sh
+      - name: Check Python analyzers
+        run: |
+          python3 -m py_compile collectors/ibm-mq/analyze_mq_log_history.py
+          python3 -m py_compile collectors/analyze_enterprise_log_history.py
+      - name: Check help contracts
+        run: |
+          bash collectors/ibm-mq/mq-log-history-collector.sh --help >/tmp/mq-help.txt
+          bash collectors/ibm-ace/ace-log-history-collector.sh --help >/tmp/ace-help.txt
+          python3 collectors/ibm-mq/analyze_mq_log_history.py --help >/tmp/mq-analyzer-help.txt
+          python3 collectors/analyze_enterprise_log_history.py --help >/tmp/enterprise-analyzer-help.txt
+      - name: Smoke test ACE and DataPower analyzer
+        run: |
+          mkdir -p /tmp/ace /tmp/dp
+          printf '%s\n' '2026-09-12 10:00:00 BIP1234E Example ACE error' '2026-09-12 10:00:01 BIP1234E Example ACE error' > /tmp/ace/activity.log
+          printf '%s\n' '2026-09-12T10:00:00Z error default-domain TLS handshake failed' '2026-09-12T10:00:01Z error default-domain TLS handshake failed' > /tmp/dp/system.log
+          python3 collectors/analyze_enterprise_log_history.py /tmp/ace --product ace --output-dir /tmp/ace-analysis
+          python3 collectors/analyze_enterprise_log_history.py /tmp/dp --product datapower --output-dir /tmp/dp-analysis
+          grep -Fq 'BIP1234E' /tmp/ace-analysis/ace-message-catalog.csv
+          grep -Fq '"database_written": false' /tmp/dp-analysis/summary.json
       - name: Check demo boundary documentation
         run: |
           grep -Fq 'outside D1' docs/phase-2p-historical-log-corpus.md
           grep -Fq 'no direct middleware connection' docs/phase-2p-historical-log-corpus.md
-          grep -Fq 'never enables MQ trace' docs/phase-2p-historical-log-corpus.md
+          grep -Fq 'never enables trace' docs/phase-2p-historical-log-corpus.md
+          grep -Fq 'manual export' docs/phase-2p-historical-log-corpus.md
+          grep -Fq 'transaction/recovery logs are intentionally' docs/phase-2p-historical-log-corpus.md
