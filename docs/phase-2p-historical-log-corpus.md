@@ -1,138 +1,132 @@
-# Phase 2P — Historical Log Corpus for Demo Discovery
+# Phase 2P — Middleware Historical Log Corpus for Demo Discovery
 
 ## Goal
 
-Collect a large, read-only historical corpus of IBM MQ diagnostic evidence from each relevant MQ host, analyze it offline, and use the results to discover real operational stories that strengthen the OSI demo.
+Collect a large, read-only historical corpus of middleware diagnostic evidence, analyze it offline, and use the results to discover real operational stories for the OSI demo. The corpus is deliberately **outside D1**. Raw logs and derived analysis artifacts remain offline unless a later, explicit product contract promotes a small verified excerpt.
 
-This corpus is not a new database plane. Raw logs and derived analysis artifacts remain outside D1. Only evidence deliberately promoted later through an approved product contract would become part of the dashboard.
+The demo phase has **no direct middleware connection**. Collection happens at the source, evidence is transferred manually, and analysis happens offline.
 
-## Why this exists
+## Evidence families
 
-Topology and sampled runtime state show what exists and what was observed at collection time. Historical diagnostic logs can reveal longer-lived patterns that short runtime windows may miss, including recurring channel/network failures, queue-manager lifecycle and recovery events, TLS/certificate failures, authorization failures, cluster disturbances, storage or resource pressure, client connection churn, repeated IBM MQ message IDs, and recurring FDC probe signatures.
+### IBM MQ
 
-The objective is discovery, not automatic diagnosis. The offline analyzer ranks candidate stories; an operator validates them against topology and runtime evidence before they are used in the demo.
+Collect retained system error logs, queue-manager error logs, FDC/FFST evidence, optional filtered systemd journal context, optional rotated OS logs, and approved pre-existing trace files. The existing `mq-log-history-collector.sh` never enables trace and never reads queue payloads.
 
-## Evidence planes
+IBM MQ transaction/recovery logs are intentionally **not** copied or dumped in the first historical-diagnostic pass. They are recovery data rather than ordinary diagnostic text, can be very large, and may contain sensitive transactional content. If later analysis demonstrates a specific need, treat recovery-log examination as a separate, explicitly approved evidence procedure rather than silently adding it to the corpus.
 
-The demo campaign keeps these planes separate:
+Useful MQ discovery targets include recurring AMQ message IDs, channel/network failures, TLS/certificate problems, authorization failures, queue-manager lifecycle and HA/recovery events, cluster disturbances, storage/resource pressure, application connection churn, and recurring FDC probe signatures.
 
-1. Canonical topology — `mq-topology-*.tar.gz` normalized into the canonical estate.
-2. Runtime observations — repeated queue/channel/listener/connection/application status samples.
-3. Findings — `osi.findings.evaluation/v1` derived from runtime evidence.
-4. Historical logs — `mq-log-history-*.tar.gz`, retained outside the database and analyzed offline.
-5. Derived log analysis — summaries, catalogs, extracted events and candidate rankings, also outside D1.
+### IBM App Connect Enterprise (ACE)
 
-A historical log event is not current runtime state, and a heuristic log candidate is not an OSI finding.
+The ACE corpus is based on the supplied ACE logging model:
 
-## Collector
+- STDOUT / STDERR from integration-server processes;
+- Linux/UNIX local error/system events routed through syslog;
+- Activity Logs;
+- Admin Log evidence when it has been explicitly exported or otherwise retained;
+- existing Service/User Trace files that were already produced for diagnosis;
+- Eclipse/Toolkit error logs when Toolkit-side behavior is relevant to the demo.
 
-`collectors/ibm-mq/mq-log-history-collector.sh`
+`collectors/ibm-ace/ace-log-history-collector.sh` inventories or copies retained filesystem evidence and can optionally add syslog and filtered journal context. It never enables ACE trace or changes an integration node/server.
 
-The collector is read-only. It does not run MQSC, browse or get queue messages, enable trace, modify MQ configuration, start or stop services, send network traffic, or write to D1.
+The Admin Log is described as an in-memory operational/admin history. Therefore the collector does not claim historical Admin Log coverage unless a retained/exported artifact is actually supplied. Likewise, Toolkit Eclipse logs are workstation evidence and should be collected from the Toolkit workstation, not inferred from an ACE runtime host.
 
-### First pass: inventory only
-
-Run this on every MQ host first:
-
-```bash
-./mq-log-history-collector.sh --inventory-only --include-journal --output-dir ./osi-log-corpus
-```
-
-This discovers retained MQ diagnostic evidence and estimates file count and bytes without copying source log files. Review `manifest.tsv` and `manifest.properties` for volume, access gaps, discovered MQ data roots and the presence of FDC evidence.
-
-### Full historical collection
-
-After reviewing volume:
+Typical first pass on an ACE host:
 
 ```bash
-./mq-log-history-collector.sh --include-journal --output-dir ./osi-log-corpus
+./ace-log-history-collector.sh \
+  --inventory-only \
+  --include-syslog \
+  --include-journal \
+  --output-dir ./osi-log-corpus
 ```
 
-By default this collects all retained readable IBM MQ diagnostic files matching the collector contract under discovered MQ data roots, including FDC/FFST evidence, plus a filtered IBM MQ systemd journal when requested.
-
-There is deliberately no arbitrary historical cutoff by default. The historical boundary is whatever the source host retained. Optional `--since`, `--until`, and `--max-bytes` controls exist for hosts where a bounded transfer is required.
-
-### Broad system context
-
-For a deeper incident-discovery pass:
+After reviewing volume and access gaps:
 
 ```bash
-./mq-log-history-collector.sh --include-journal --include-system-files --output-dir ./osi-log-corpus
+./ace-log-history-collector.sh \
+  --include-syslog \
+  --include-journal \
+  --output-dir ./osi-log-corpus
 ```
 
-`--include-system-files` copies broad rotated `messages`, `syslog`, `daemon` and `kern` files. These can contain unrelated host activity and are intentionally opt-in.
-
-### Existing trace files
-
-Trace is excluded by default because it can be very large and substantially more detailed. If a pre-existing trace is specifically approved:
+If the ACE work directory is non-standard, supply it explicitly and repeat `--root` as required:
 
 ```bash
-./mq-log-history-collector.sh --include-trace --output-dir ./osi-log-corpus
+./ace-log-history-collector.sh --root /path/to/ace-work --root /another/retained-log-root --output-dir ./osi-log-corpus
 ```
 
-The collector never enables MQ trace.
+### IBM DataPower Gateway
 
-## Permissions
+For the demo, DataPower remains a **manual export** source. We do not introduce appliance credentials or a direct collector connection. Export the retained artifacts approved for analysis and place them in a directory or archive before transfer to OSI.
 
-Run the normal MQ pass as an IBM MQ administrative account with read access to the MQ data tree. Some systemd journal or broad system-log evidence may require additional OS permissions. Record access gaps instead of inferring missing content.
+The primary evidence classes from the supplied DataPower logging model are:
 
-## Package structure
+- System Log — operational messages from the default and application domains at configured priority levels;
+- Audit Log — configuration/system-file changes;
+- Traces — low-level component diagnostics when trace was already captured for a real troubleshooting event.
+
+Do not enable additional DataPower tracing merely to enrich the demo. Use retained/exported traces only.
+
+## Offline analysis
+
+### MQ-specific analysis
+
+```bash
+python3 collectors/ibm-mq/analyze_mq_log_history.py \
+  mq-log-history-<host>-<timestamp>.tar.gz \
+  --output-dir ./analysis-mq-<host>
+```
+
+This produces corpus summary, compressed extracted events, AMQ message catalog, FDC signatures and ranked demo candidates.
+
+### ACE analysis
+
+```bash
+python3 collectors/analyze_enterprise_log_history.py \
+  ace-log-history-<host>-<timestamp>.tar.gz \
+  --product ace \
+  --output-dir ./analysis-ace-<host>
+```
+
+ACE analysis extracts BIP message identifiers when present, severity, source evidence class, recurring normalized patterns, source-file locations and ranked candidate stories.
+
+### DataPower analysis
+
+After manually exporting System/Audit/Trace files into a directory or `.tar.gz`/`.zip`:
+
+```bash
+python3 collectors/analyze_enterprise_log_history.py \
+  ./datapower-export \
+  --product datapower \
+  --output-dir ./analysis-datapower
+```
+
+Because the supplied DataPower material does not define a stable product message-ID convention, the analyzer does not invent one. It ranks recurring normalized patterns, severity and evidence class and preserves the source file/line for operator review.
+
+## Evidence integrity and boundaries
+
+Historical-log packages should preserve source host/device, source path or export origin, source modification time where available, size, SHA-256, collection/export time, collector/analyzer version and access/copy status. Missing or unreadable evidence is a coverage limitation, not proof that an event did not occur.
+
+The discovery analyzers are heuristic. A high-ranked log pattern is **not** automatically an OSI finding and is not proof of causality. Before a candidate appears in the demo, correlate it with canonical topology, runtime observations, routes/impact, existing findings, recovery evidence and—where relevant—change history.
+
+## Demo story selection
+
+Prefer real stories that show several evidence planes agreeing, for example:
 
 ```text
-mq-log-history-<host>-<utc>/
-  manifest.properties
-  manifest.tsv
-  package-checksums.sha256
-  README.txt
-  meta/
-    hostname.*
-    date-local.*
-    date-utc.*
-    timedatectl.*
-    dspmq.*
-    dspmqver.*
-    search-roots.txt
-  raw/
-    files/
-      var/mqm/.../errors/AMQERR01.LOG
-      var/mqm/.../errors/...
-    system/
-      journal-mq.log
-      journal-boots.out
+historical diagnostic event
+  -> affected middleware object / integration flow / domain
+  -> topology or route context
+  -> runtime symptom or finding
+  -> operator action / administrative change
+  -> recovery evidence
 ```
 
-`manifest.tsv` preserves evidence class, original source path, size, source mtime, archive path, SHA-256 and copy/access status.
+Especially valuable candidates are cross-product sequences such as ACE application/flow failure followed by MQ channel/queue symptoms, or DataPower gateway/TLS errors aligning with external MQ transport evidence. Cross-product correlation must be based on timestamps, identifiers and topology evidence; temporal proximity alone is not enough to claim causality.
 
-## Offline analyzer
+## Campaign procedure
 
-`collectors/ibm-mq/analyze_mq_log_history.py`
+Run an inventory-first pass on every relevant MQ and ACE host, export the approved retained DataPower logs, then transfer all packages manually to the OSI analysis workstation. Analyze each source independently first, then build a cross-source candidate index keyed by time window, host/device, queue manager, application/integration server, flow/domain, channel/endpoint and message/error identifier where available.
 
-Example:
-
-```bash
-python3 analyze_mq_log_history.py mq-log-history-host-20260912T120000Z.tar.gz --output-dir ./analysis-host
-```
-
-It produces:
-
-- `summary.json` — corpus scale, time bounds, severity/category counts and limitations;
-- `events.ndjson.gz` — extracted IBM MQ message occurrences with source file and best-effort timestamp;
-- `mq-message-catalog.csv` — counts, first/last seen, severities, categories and examples by AMQ message ID;
-- `fdc-signatures.csv` — recurring FDC probe/component/program signatures;
-- `demo-candidates.json` — heuristic ranking of recurring or error-heavy patterns worth operator review.
-
-The analyzer does not convert a message ID into a causal conclusion. Its first job is to show what is actually present in the historical corpus and where the strongest evidence clusters are.
-
-## What we want to discover
-
-The strongest demo candidates are patterns that recur, span multiple files or hosts, have explicit MQ warning/error identifiers, align with canonical objects or routes, overlap runtime state changes, show failure-to-recovery progression, expose an operational limitation OSI can explain, or support a before/after development-change story.
-
-For each candidate story, build an evidence dossier containing source host and queue manager, AMQ message IDs and/or FDC probes, first/last timestamps and recurrence count, related canonical objects/routes, matching runtime observations/findings when available, recovery evidence, and explicit limitations.
-
-## Transfer boundary
-
-Historical diagnostic corpora can contain detailed operational metadata. Review raw packages before moving excerpts into another environment. Keep the raw corpus in the approved offline analysis workflow and transfer only the material needed for the analysis task.
-
-During the demo phase there is no direct middleware connection. OSI data arrives manually. Historical-log collection follows the same model: collect on the source host, transfer the archive manually, analyze it offline, and selectively use verified discoveries to improve the demo narrative.
-
-No raw log ingestion into D1 is planned for this phase.
+No raw log ingestion into D1 is planned for Phase 2P.
