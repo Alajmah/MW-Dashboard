@@ -7,11 +7,14 @@ import { handleSemanticEstateRead } from "./semantic-estate-read";
 import { handleSemanticImpact } from "./semantic-impact";
 import { handleSemanticImport } from "./semantic-import";
 import { handleSemanticRoutes } from "./semantic-routes";
+import { handleTelemetryIngest } from "./telemetry-ingest";
 
 interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
   ADMIN_IMPORT_TOKEN?: string;
+  TELEMETRY_INGEST_ENABLED?: string;
+  TELEMETRY_INGEST_KEYS_JSON?: string;
 }
 
 const EVIDENCE_CHUNK_CHARS = 250_000;
@@ -78,6 +81,13 @@ export default {
       const denial = await importAuthorizationDenial(request, env.ADMIN_IMPORT_TOKEN, true);
       if (denial) return denial;
     }
+
+    const telemetryIngest = await handleTelemetryIngest(request, {
+      DB: env.DB,
+      TELEMETRY_INGEST_ENABLED: env.TELEMETRY_INGEST_ENABLED,
+      TELEMETRY_INGEST_KEYS_JSON: env.TELEMETRY_INGEST_KEYS_JSON,
+    });
+    if (telemetryIngest) return telemetryIngest;
 
     const semanticImport = await handleSemanticImport(request, {
       DB: env.DB,
