@@ -1,0 +1,45 @@
+name: Phase 2Q demo evidence qualification check
+
+on:
+  pull_request:
+    paths:
+      - "scripts/phase2q_campaign_index.py"
+      - "scripts/build-phase2q-demo-evidence-kit.sh"
+      - "contracts/demo/v1/**"
+      - "docs/phase-2q-demo-evidence-qualification.md"
+      - ".github/workflows/phase2q-demo-evidence-qualification-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/phase2q_campaign_index.py"
+      - "scripts/build-phase2q-demo-evidence-kit.sh"
+      - "contracts/demo/v1/**"
+      - "docs/phase-2q-demo-evidence-qualification.md"
+      - ".github/workflows/phase2q-demo-evidence-qualification-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check Phase 2Q scripts
+        run: |
+          bash -n scripts/build-phase2q-demo-evidence-kit.sh
+          python3 -m py_compile scripts/phase2q_campaign_index.py
+          python3 scripts/phase2q_campaign_index.py --help >/dev/null
+      - name: Validate campaign contract
+        run: python3 -m json.tool contracts/demo/v1/evidence-campaign.schema.json >/dev/null
+      - name: Build portable evidence kit
+        run: |
+          mkdir -p /tmp/phase2q-kit
+          KIT="$(bash scripts/build-phase2q-demo-evidence-kit.sh /tmp/phase2q-kit)"
+          test -f "$KIT"
+          tar -tzf "$KIT" | grep -Fq 'workstation/phase2q_campaign_index.py'
+      - name: Verify offline qualification boundary
+        run: |
+          mkdir -p /tmp/phase2q-empty
+          python3 scripts/phase2q_campaign_index.py /tmp/phase2q-empty --output /tmp/phase2q-index.json
+          python3 -c 'import json; d=json.load(open("/tmp/phase2q-index.json")); assert d["database_written"] is False; assert d["summary"]["qualified_demo_episode_count"] == 0'
