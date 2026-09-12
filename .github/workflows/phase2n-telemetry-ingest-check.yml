@@ -43,9 +43,10 @@ jobs:
         run: |
           set -euo pipefail
           ! grep -R "TELEMETRY_INGEST_ENABLED.*true" wrangler.jsonc .github/workflows/deploy-cloudflare.yml
-          ! grep -R "phase2n-test-secret" src/ wrangler.jsonc .github/workflows/ || true
+          ! grep -R "phase2n-test-secret" src/ wrangler.jsonc .github/workflows/
           grep -Fq 'TELEMETRY_INGEST_KEYS_JSON' src/telemetry-ingest.ts
           grep -Fq 'dark_launch_disabled' src/telemetry-ingest.ts
+          grep -Fq '"ingress_enabled": false' .github/workflows/deploy-cloudflare.yml
 
       - name: Verify Phase 2N migration shape
         shell: bash
