@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mw-dashboard.local/contracts/telemetry/v1/telemetry-batch.schema.json",
+  "title": "OSI Telemetry Batch v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run", "coverage", "observations"],
+  "properties": {
+    "schema_version": {"const": "osi.telemetry.batch/v1"},
+    "run": {"$ref": "#/$defs/run"},
+    "coverage": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/coverage"}
+    },
+    "observations": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/observation"}
+    }
+  },
+  "$defs": {
+    "scalar": {
+      "type": ["string", "number", "integer", "boolean", "null"]
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id", "observer", "observer_version", "profile", "started_at",
+        "completed_at", "sample_count", "sample_interval_seconds", "source"
+      ],
+      "properties": {
+        "run_id": {"type": "string", "minLength": 1},
+        "observer": {"const": "osi-mq-observer"},
+        "observer_version": {"type": "string", "minLength": 1},
+        "profile": {"enum": ["baseline"]},
+        "started_at": {"type": "string", "format": "date-time"},
+        "completed_at": {"type": "string", "format": "date-time"},
+        "sample_count": {"type": "integer", "minimum": 1},
+        "sample_interval_seconds": {"type": "integer", "minimum": 0},
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "source_id", "source_host"],
+          "properties": {
+            "kind": {"const": "ibm_mq_host"},
+            "source_id": {"type": "string", "minLength": 1},
+            "source_host": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["semantic_type", "display_name", "identity_hints"],
+      "properties": {
+        "semantic_type": {"type": "string", "minLength": 1},
+        "display_name": {"type": "string", "minLength": 1},
+        "canonical_entity_id": {
+          "type": ["string", "null"],
+          "pattern": "^cent_[0-9a-f]{24}$"
+        },
+        "identity_hints": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {"$ref": "#/$defs/scalar"}
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id", "source_host", "queue_manager", "collection_method",
+        "command", "evidence_class", "evidence_ref", "sample_id"
+      ],
+      "properties": {
+        "source_id": {"type": "string", "minLength": 1},
+        "source_host": {"type": "string", "minLength": 1},
+        "queue_manager": {"type": "string", "minLength": 1},
+        "collection_method": {"type": "string", "minLength": 1},
+        "command": {"type": "string", "pattern": "^DISPLAY\\s"},
+        "evidence_class": {"const": "observed"},
+        "evidence_ref": {"type": "string", "minLength": 1},
+        "sample_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["coverage", "freshness"],
+      "properties": {
+        "coverage": {"enum": ["point_in_time", "partial", "failed", "not_collected"]},
+        "freshness": {"enum": ["sampled", "stale", "unknown"]}
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation_id", "entity", "observation_type", "observed_at",
+        "value", "unit", "source", "quality"
+      ],
+      "properties": {
+        "observation_id": {"type": "string", "pattern": "^tobs_[0-9a-f]{24}$"},
+        "entity": {"$ref": "#/$defs/entity"},
+        "observation_type": {"type": "string", "minLength": 1},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "value": {"type": ["string", "number", "integer", "boolean"]},
+        "unit": {"type": "string", "minLength": 1},
+        "source": {"$ref": "#/$defs/source"},
+        "quality": {"$ref": "#/$defs/quality"},
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": {"$ref": "#/$defs/scalar"}
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope_type", "scope_key", "observation_family", "sample_id",
+        "observed_at", "state", "collection_method", "command", "evidence_ref"
+      ],
+      "properties": {
+        "scope_type": {"type": "string", "minLength": 1},
+        "scope_key": {"type": "string", "minLength": 1},
+        "observation_family": {"type": "string", "minLength": 1},
+        "sample_id": {"type": "string", "minLength": 1},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "state": {"enum": ["point_in_time", "partial", "failed", "not_collected"]},
+        "collection_method": {"type": "string", "minLength": 1},
+        "command": {"type": "string", "pattern": "^DISPLAY\\s"},
+        "evidence_ref": {"type": "string", "minLength": 1},
+        "error": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

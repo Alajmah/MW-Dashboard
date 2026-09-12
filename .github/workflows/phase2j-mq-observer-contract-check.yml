@@ -1,0 +1,57 @@
+name: Phase 2J MQ observer contract check
+
+on:
+  pull_request:
+    paths:
+      - "contracts/telemetry/**"
+      - "collectors/ibm-mq/observer/**"
+      - "docs/phase-2j-telemetry-contract-mq-observer.md"
+      - ".github/workflows/phase2j-mq-observer-contract-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "contracts/telemetry/**"
+      - "collectors/ibm-mq/observer/**"
+      - "docs/phase-2j-telemetry-contract-mq-observer.md"
+      - ".github/workflows/phase2j-mq-observer-contract-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate JSON schema syntax
+        run: python -m json.tool contracts/telemetry/v1/telemetry-batch.schema.json >/dev/null
+
+      - name: Python syntax
+        run: python -m py_compile collectors/ibm-mq/observer/osi_mq_observer.py
+
+      - name: Observer unit tests
+        run: python -m unittest collectors/ibm-mq/observer/test_osi_mq_observer.py -v
+
+      - name: Prove dry run is read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          plan="$(python collectors/ibm-mq/observer/osi_mq_observer.py --dry-run --qmgr QM.TEST)"
+          printf '%s\n' "$plan"
+          printf '%s\n' "$plan" | grep -Fq '"mq_state_mutation": false'
+          printf '%s\n' "$plan" | grep -Fq '"message_consumption": false'
+          printf '%s\n' "$plan" | grep -Fq '"network_publish": false'
+          printf '%s\n' "$plan" | grep -Fq 'DISPLAY QSTATUS(*) TYPE(QUEUE) ALL'
+          ! printf '%s\n' "$plan" | grep -Eq 'RESET QSTATS|CLEAR QLOCAL|ALTER QMGR|START CHANNEL|STOP CHANNEL|REFRESH'
+
+      - name: Verify semantic boundary text
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'does **not** mint `cent_*` identifiers' collectors/ibm-mq/observer/README.md
+          grep -Fq 'Canonical identity remains owned by the semantic estate' docs/phase-2j-telemetry-contract-mq-observer.md
+          grep -Fq 'does not yet emit NETTIME/XQTIME' docs/phase-2j-telemetry-contract-mq-observer.md
+          grep -Fq 'No daemon is installed' docs/phase-2j-telemetry-contract-mq-observer.md
