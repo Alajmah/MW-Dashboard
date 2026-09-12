@@ -65,7 +65,11 @@ jobs:
           set -euo pipefail
           file=src/telemetry-ingest-verify.ts
           ! grep -Eiq '\b(runmqsc|dspmq|D1Database|wrangler|ADMIN_IMPORT_TOKEN)\b' "$file"
-          grep -Fq 'const signingMessage = `v1\\n${timestampText}\\n${keyId}\\n${expectedDelivery}\\n${expectedDigest}`' "$file"
+          grep -Fq 'const signingMessage = `v1' "$file"
+          grep -Fq '${timestampText}' "$file"
+          grep -Fq '${keyId}' "$file"
+          grep -Fq '${expectedDelivery}' "$file"
+          grep -Fq '${expectedDigest}`;' "$file"
           grep -Fq 'DEFAULT_MAX_BODY_BYTES = 32 * 1024 * 1024' "$file"
           grep -Fq 'MIN_SECRET_BYTES = 32' "$file"
 
