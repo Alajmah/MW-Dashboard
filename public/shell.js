@@ -14,6 +14,7 @@ import "/phase2f-investigation-bootstrap.js?v=20260911-1";
 import "/phase2g-investigation-clarity.js?v=20260911-1";
 import "/phase2h-topology-impact.js?v=20260911-1";
 import "/administration-ops.js?v=20260911-1";
+import "/phase2o-demo-manual-mode.js?v=20260912-1";
 
 const UI_ASSET_REVISION = "20260911-7";
 
@@ -26,7 +27,7 @@ const shellCopy = {
   applications: ["Applications", "Legacy snapshot view retained while application-specific canonical projections are migrated."],
   routes: ["Routes", "Trace canonical delivery semantics, runtime queue access and MQ transport while keeping access evidence distinct from actual PUT/GET activity."],
   snapshots: ["Collection", "Evidence sources, imports and retained canonical revisions for traceability."],
-  administration: ["Administration", "Protected ingestion for canonical topology sources and OSI operational evaluations."],
+  administration: ["Administration", "Manual OSI evidence handoff for the demo: topology and operational evaluations arrive as transferred artifacts; no direct middleware connection is required."],
 };
 
 let legacyPromise = null;
