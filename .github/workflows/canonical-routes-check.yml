@@ -13,6 +13,7 @@ on:
       - "scripts/reconcile-current-estate.mjs"
       - "scripts/test-integrated-observation-bundle.mjs"
       - "scripts/test-integrated-evidence-guards.mjs"
+      - "scripts/test-reconcile-current-estate.mjs"
       - "scripts/seed-canonical-routes-ci.sql"
       - "migrations/**"
       - ".github/workflows/canonical-routes-check.yml"
@@ -30,6 +31,7 @@ on:
       - "scripts/reconcile-current-estate.mjs"
       - "scripts/test-integrated-observation-bundle.mjs"
       - "scripts/test-integrated-evidence-guards.mjs"
+      - "scripts/test-reconcile-current-estate.mjs"
       - "scripts/seed-canonical-routes-ci.sql"
       - "migrations/**"
       - ".github/workflows/canonical-routes-check.yml"
@@ -59,11 +61,13 @@ jobs:
           node --check scripts/reconcile-current-estate.mjs
           node --check scripts/test-integrated-observation-bundle.mjs
           node --check scripts/test-integrated-evidence-guards.mjs
+          node --check scripts/test-reconcile-current-estate.mjs
 
-      - name: Normalize sanitized integrated evidence fixture
+      - name: Integrated evidence regressions
         run: |
           node scripts/test-integrated-observation-bundle.mjs
           node scripts/test-integrated-evidence-guards.mjs
+          node scripts/test-reconcile-current-estate.mjs
 
       - name: Apply local D1 migrations
         run: npm run db:migrate:local
