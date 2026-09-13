@@ -133,7 +133,7 @@ function normalize({ graph, route, evidenceIndex, sourceName, environment='prod'
     evidence_ref: evidenceRef(qmgr), status: qmgr.status, properties: { ...qmgr.attributes, queue_manager: qmgr.name, integrated_entity_id: qmgr.id, evidence_refs: evidenceRefs(qmgr) },
   });
   const queueRef = b.entity('mq.queue', { queue_manager_key: qmgr.name, name: queue.name }, queue.name, completedAt, 'configured', {
-    evidence_ref: evidenceRef(queue), status: queue.status, properties: { ...queue.attributes, queue_manager: qmgr.name, queue_type: 'QLOCAL', integrated_entity_id: queue.id, evidence_refs: evidenceRefs(queue) },
+    evidence_ref: evidenceRef(queue), status: queue.status, properties: { ...queue.attributes, queue_manager: qmgr.name, route_target: true, integrated_entity_id: queue.id, evidence_refs: evidenceRefs(queue) },
   });
   b.relation('contains', qmgrRef, queueRef, completedAt, 'configured', { evidence_ref: evidenceRef(queue), properties: { queue_manager: qmgr.name, evidence_refs: evidenceRefs(queue) } });
 
