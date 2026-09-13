@@ -45,7 +45,12 @@ export async function handleIntegratedRoutes(request:Request,env:IntegratedRoute
     const estateId=String(estate.estate_revision_id);
     const relation=await directIntegratedRoute(env.DB,estateId,from,to); if(!relation)return null;
     const [source,target]=await Promise.all([entity(env.DB,estateId,from),entity(env.DB,estateId,to)]); if(!source||!target)return null;
-    const properties=(relation.properties??{}) as JsonMap; const evidenceClasses=Array.isArray(relation.evidence_classes)?relation.evidence_classes:[];
+    const properties=(relation.properties??{}) as JsonMap;
+    // Do not take ownership of generic integration routes. Phase 2X is only the
+    // explicitly qualified DataPower -> MQ queue projection; everything else
+    // must continue through the generic semantic route engine.
+    if(source.semantic_type!=="datapower.service"||target.semantic_type!=="mq.queue"||properties.qualified_route!==true)return null;
+    const evidenceClasses=Array.isArray(relation.evidence_classes)?relation.evidence_classes:[];
     const semanticWarning=typeof properties.semantic_warning==="string"?properties.semantic_warning:"Configured integration route evidence does not prove a specific runtime message traversal.";
     const unresolved=await unresolvedFor(env.DB,estateId,[from,to]);
     return reply({
@@ -53,7 +58,7 @@ export async function handleIntegratedRoutes(request:Request,env:IntegratedRoute
       steps:[{relation_id:relation.relation_id,semantic_type:"integration.routes_to",label:"Routes to",reversed:false,from:source,to:target,evidence_classes:evidenceClasses,properties,semantic_warning:semanticWarning}],
       transport:[], unresolved,
       estate:{estate_revision_id:estateId,source_set_hash:estate.source_set_hash,source_revision_ids:parseJson(estate.source_revision_ids_json,[]),built_at:estate.built_at,activated_at:estate.activated_at,quality:parseJson(estate.quality_json,{})},
-      semantics:{runtime_access_is_activity:false,configured_route_is_runtime_traversal:false,qualified_route:Boolean(properties.qualified_route),derived_epistemic:properties.epistemic??null,runtime_corroboration:properties.runtime_corroboration??[]},
+      semantics:{runtime_access_is_activity:false,configured_route_is_runtime_traversal:false,qualified_route:true,derived_epistemic:properties.epistemic??null,runtime_corroboration:properties.runtime_corroboration??[]},
       explanation:"A deterministic configured DataPower route is supported by the current canonical estate. Static route evidence remains distinct from runtime MQ connectivity evidence."
     });
   }catch(error){console.error("integrated route query failed",error); return reply({detail:"Integrated route query failed",code:"INTEGRATED_ROUTE_QUERY_FAILED"},500);}
