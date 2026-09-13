@@ -40,6 +40,7 @@ assert(b.run.normalizer_version==='3.1.0','semantic normalizer contract');
 assert(b.run.metadata?.excludes_historical===true,'historical exclusion');
 assert(b.entities.some(x=>x.semantic_type==='ace.integration_node'),'ACE node missing');
 assert(b.entities.filter(x=>x.semantic_type==='datapower.appliance').length===2,'DataPower appliances');
+const target=b.entities.find(x=>x.semantic_type==='mq.queue'&&x.display_name==='APP.REQUEST.IN'); assert(target,'route target queue'); assert(target.properties?.route_target===true,'route target marker'); assert(!Object.hasOwn(target.properties||{},'queue_type'),'static route must not invent MQ queue type');
 const routes=b.relations.filter(x=>x.semantic_type==='integration.routes_to'); assert(routes.length===2,'two active-active route relations');
 for(const r of routes){assert(r.evidence_class==='configured','route evidence');assert(r.derivation_method==='deterministic_static_route_projection','derivation');assert(r.deterministic===true,'deterministic');assert(r.properties?.epistemic==='derived','derived property');assert(r.properties?.qualified_route===true,'qualified route');assert(r.properties?.qualified_route_chain?.length>=8,'route chain');assert(r.properties?.runtime_corroboration?.length===1,'runtime corroboration separation');}
 const net=b.relations.filter(x=>x.semantic_type==='network.connects_to'); assert(net.some(x=>x.evidence_class==='configured'),'configured backend'); assert(net.some(x=>x.evidence_class==='observed'),'observed backend');
