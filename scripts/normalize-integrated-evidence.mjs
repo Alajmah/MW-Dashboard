@@ -104,7 +104,6 @@ function normalize({ graph, route, evidenceIndex, sourceName, environment='prod'
   const b = new Builder(run);
   const refByIntegratedId = new Map();
 
-  // Current ACE integration nodes + their physical hosts.
   for (const ace of [...entities.values()].filter((x) => x.kind === 'ace_integration_node')) {
     const hostName = ace.attributes?.physical_host;
     const host = findRuntimeHostForAppliance(graph, hostName);
@@ -123,7 +122,6 @@ function normalize({ graph, route, evidenceIndex, sourceName, environment='prod'
     b.relation('runs_on', aceRef, hostRef, completedAt, 'observed', { evidence_ref: evidenceRef(ace), properties: { evidence_refs: evidenceRefs(ace) } });
   }
 
-  // MQ route anchors deliberately use the same identity hints as the native MQ normalizer.
   const qmgrStep = route.steps.find((step) => entities.get(step.entity)?.kind === 'mq_queue_manager');
   const qmgr = entities.get(qmgrStep?.entity);
   const queueStep = route.steps.find((step) => entities.get(step.entity)?.kind === 'mq_queue');
@@ -137,15 +135,32 @@ function normalize({ graph, route, evidenceIndex, sourceName, environment='prod'
   });
   b.relation('contains', qmgrRef, queueRef, completedAt, 'configured', { evidence_ref: evidenceRef(queue), properties: { queue_manager: qmgr.name, evidence_refs: evidenceRefs(queue) } });
 
-  const runtimeEdges = edges.filter((x) => route.runtime_corroboration_edges.includes(x.id));
+  const edgeById = new Map(edges.map((edge) => [edge.id, edge]));
+  const runtimeEdges = [];
+  for (const edgeId of uniq(route.runtime_corroboration_edges ?? [])) {
+    const edge = edgeById.get(edgeId);
+    if (!edge) fail(`runtime corroboration edge not found: ${edgeId}`);
+    const source = entities.get(edge.source);
+    const runtime = source ? [...entities.values()].find((x) => x.kind === 'datapower_runtime' && x.id.endsWith(`:${source.name}`)) : null;
+    if (edge.relationship !== 'observed_client_connection') fail(`runtime corroboration edge ${edgeId} has unsupported relationship ${edge.relationship}`);
+    if (edge.epistemic !== 'observed') fail(`runtime corroboration edge ${edgeId} must be observed`);
+    if (edge.target !== qmgr.id) fail(`runtime corroboration edge ${edgeId} does not target selected queue manager ${qmgr.id}`);
+    if (!source || source.kind !== 'physical_host' || !runtime) fail(`runtime corroboration edge ${edgeId} must originate from a DataPower physical host`);
+    if (edge.status && edge.status !== 'present') fail(`runtime corroboration edge ${edgeId} is not present`);
+    runtimeEdges.push(edge);
+  }
   if (!runtimeEdges.length) fail('runtime corroboration is required');
-  const commonChannelName = runtimeEdges.flatMap((x) => x.attributes?.channels ?? []).find(Boolean) ?? null;
-  const channel = [...entities.values()].find((x) => x.kind === 'mq_channel' && (!commonChannelName || x.name === commonChannelName)) ?? null;
+
+  const corroboratedChannelNames = uniq(runtimeEdges.flatMap((x) => x.attributes?.channels ?? []).map((x) => String(x).trim()).filter(Boolean));
+  const commonChannelName = corroboratedChannelNames.length === 1 ? corroboratedChannelNames[0] : null;
+  const channelCandidate = commonChannelName ? [...entities.values()].find((x) => x.kind === 'mq_channel' && x.name === commonChannelName) ?? null : null;
+  const configuredChannelEdge = channelCandidate ? edges.find((edge) => edge.target === channelCandidate.id && edge.relationship === 'uses_channel' && edge.epistemic === 'configured') ?? null : null;
+  const channel = configuredChannelEdge ? channelCandidate : null;
   if (channel) {
     const channelRef = b.entity('mq.channel', { queue_manager_key: qmgr.name, name: channel.name }, channel.name, completedAt, 'configured', {
-      evidence_ref: evidenceRef(channel), status: channel.status, properties: { queue_manager: qmgr.name, integrated_entity_id: channel.id, evidence_refs: evidenceRefs(channel) },
+      evidence_ref: evidenceRef(configuredChannelEdge), status: channel.status, properties: { queue_manager: qmgr.name, integrated_entity_id: channel.id, evidence_refs: uniq([...evidenceRefs(channel), ...evidenceRefs(configuredChannelEdge)]) },
     });
-    b.relation('contains', qmgrRef, channelRef, completedAt, 'configured', { evidence_ref: evidenceRef(channel), properties: { queue_manager: qmgr.name } });
+    b.relation('contains', qmgrRef, channelRef, completedAt, 'configured', { evidence_ref: evidenceRef(configuredChannelEdge), properties: { queue_manager: qmgr.name, evidence_refs: evidenceRefs(configuredChannelEdge) } });
   }
 
   const routeServiceId = route.steps.find((s) => entities.get(s.entity)?.kind === 'datapower_service')?.entity;
@@ -159,10 +174,8 @@ function normalize({ graph, route, evidenceIndex, sourceName, environment='prod'
   const routeEvidence = routeEvidenceDetails(route, evidenceIndex);
   const routeChain = route.steps.map((step) => ({ entity_id: step.entity, label: step.label, epistemic: step.epistemic }));
 
-  // One logical route service per appliance. This respects the existing registry's appliance/domain/service identity rules.
   for (const runtimeEdge of runtimeEdges) {
     const host = entities.get(runtimeEdge.source);
-    if (!host || host.kind !== 'physical_host') continue;
     const runtime = [...entities.values()].find((x) => x.kind === 'datapower_runtime' && x.attributes?.management_endpoint && x.id.endsWith(`:${host.name}`));
     if (!runtime) fail(`DataPower runtime missing for ${host.name}`);
     const hostRef = b.entity('infra.host', { name: host.name, primary_ip: host.attributes?.ip ?? runtimeEdge.attributes?.client_ip }, host.name, completedAt, 'observed', {
@@ -203,6 +216,8 @@ function normalize({ graph, route, evidenceIndex, sourceName, environment='prod'
       queue: queue.name,
       backend_group: routeGroup.name,
       channel: channel?.name ?? null,
+      corroborated_channels: corroboratedChannelNames,
+      channel_resolution: corroboratedChannelNames.length === 0 ? 'unavailable' : corroboratedChannelNames.length === 1 ? (channel ? 'configured-and-corroborated' : 'observed-only') : 'ambiguous',
       static_resource: routeResource.attributes?.resource_path ?? routeResource.name,
       static_resource_sha256: routeResource.attributes?.sha256_by_node?.[host.name] ?? null,
       qualified_route_chain: routeChain,
