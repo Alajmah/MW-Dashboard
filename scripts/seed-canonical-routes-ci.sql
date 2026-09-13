@@ -21,7 +21,7 @@ INSERT INTO semantic_estate_revision (
   'estate-route-ci',
   'e41d40e45fb8da4fb01b9f67b81732e321a5f8cc23843d7ce1b16e75c3e26073',
   '["route-source-revision"]', '2026-09-09T00:01:00Z', '2026-09-09T00:01:00Z',
-  'ACTIVE', 1, 7, 6, 1, '{"valid":true,"source_count":1}'
+  'ACTIVE', 1, 9, 7, 1, '{"valid":true,"source_count":1}'
 );
 
 INSERT INTO semantic_estate_entity
@@ -33,7 +33,9 @@ VALUES
 ('estate-route-ci','app-consumer','app.application_instance','rule_2','host_key=client-b|name=CONSUMER','resolved','CONSUMER','2026-09-09T00:00:00Z','{"host":"client-b"}','["observed"]','["host-route"]','[]',1,1),
 ('estate-route-ci','q-xmit','mq.queue','rule_2','queue_manager_key=QM1|name=QM2.XMIT','resolved','QM2.XMIT','2026-09-09T00:00:00Z','{"queue_manager":"QM1","queue_type":"QLOCAL","usage":"XMITQ"}','["configured"]','["host-route"]','[]',1,1),
 ('estate-route-ci','ch-sender','mq.channel','rule_2','queue_manager_key=QM1|name=TO.QM2','resolved','TO.QM2','2026-09-09T00:00:00Z','{"queue_manager":"QM1","channel_type":"SDR"}','["configured","observed"]','["host-route"]','[]',2,1),
-('estate-route-ci','qm-peer','mq.queue_manager','qmid','QM2_2026','resolved','QM2','2026-09-09T00:00:00Z','{"queue_manager":"QM2"}','["observed"]','["host-route"]','[]',1,1);
+('estate-route-ci','qm-peer','mq.queue_manager','qmid','QM2_2026','resolved','QM2','2026-09-09T00:00:00Z','{"queue_manager":"QM2"}','["observed"]','["host-route"]','[]',1,1),
+('estate-route-ci','dp-service','datapower.service','rule_2','domain_key=dp-a|name=DP_GATEWAY','resolved','DP_GATEWAY','2026-09-09T00:00:00Z','{"domain":"APP_DOMAIN","physical_host":"dp-a"}','["configured"]','["host-route"]','[]',1,1),
+('estate-route-ci','dp-q-target','mq.queue','rule_2','queue_manager_key=QM2|name=DP.REQUEST.IN','resolved','DP.REQUEST.IN','2026-09-09T00:00:00Z','{"queue_manager":"QM2","queue_type":"QLOCAL"}','["configured"]','["host-route"]','[]',1,1);
 
 INSERT INTO semantic_estate_relation
 (estate_revision_id, relation_id, semantic_type, source_entity_id, target_entity_id, observed_at, properties_json, evidence_classes_json, source_ids_json, source_observations_json, evidence_count, source_count)
@@ -43,7 +45,8 @@ VALUES
 ('estate-route-ci','r-open-input','runtime.opens_for_input','app-consumer','q-target','2026-09-09T00:00:00Z','{}','["observed"]','["host-route"]','[]',1,1),
 ('estate-route-ci','r-route-via','routing.routes_via','q-remote','q-xmit','2026-09-09T00:00:00Z','{}','["configured"]','["host-route"]','[]',1,1),
 ('estate-route-ci','r-transmit','routing.transmits_via','q-xmit','ch-sender','2026-09-09T00:00:00Z','{}','["configured"]','["host-route"]','[]',1,1),
-('estate-route-ci','r-connect','network.connects_to','ch-sender','qm-peer','2026-09-09T00:00:00Z','{}','["observed"]','["host-route"]','[]',1,1);
+('estate-route-ci','r-connect','network.connects_to','ch-sender','qm-peer','2026-09-09T00:00:00Z','{}','["observed"]','["host-route"]','[]',1,1),
+('estate-route-ci','r-dp-route','integration.routes_to','dp-service','dp-q-target','2026-09-09T00:00:00Z','{"qualified_route":true,"epistemic":"derived","derivation_method":"deterministic_static_route_projection","deterministic":true,"route_uri_literal":"dpmq://GWQM/?RequestQueue=DP.REQUEST.IN","queue_manager":"QM2","backend_group":"GWQM","channel":"SVRCON_DP","qualified_route_chain":[{"label":"APP_DOMAIN","epistemic":"observed"},{"label":"HTTP handler 127.0.0.1:6027","epistemic":"configured"},{"label":"DP_GATEWAY","epistemic":"configured"},{"label":"StylePolicy","epistemic":"configured"},{"label":"XSLT route resource","epistemic":"derived"},{"label":"GWQM","epistemic":"derived+configured"},{"label":"QM2","epistemic":"configured+observed"},{"label":"DP.REQUEST.IN","epistemic":"derived"}],"runtime_corroboration":[{"physical_host":"dp-a","client_ip":"192.0.2.10","channels":["SVRCON_DP"],"sample_connection_count":2}],"semantic_warning":"Configured/static DataPower route evidence does not prove a specific message traversal. MQ runtime evidence independently corroborates DataPower client connectivity to the target queue manager."}','["configured"]','["host-route"]','[]',1,1);
 
 INSERT INTO semantic_estate_unresolved
 (estate_revision_id, unresolved_id, source_entity_id, semantic_type, expected_target_type, vendor_value, state, reason, candidate_entity_ids_json, source_ids_json, source_observations_json, evidence_count)

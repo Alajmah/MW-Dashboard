@@ -4,9 +4,16 @@ on:
   pull_request:
     paths:
       - "src/bootstrap.ts"
+      - "src/integrated-routes.ts"
       - "src/semantic-routes.ts"
       - "public/routes-estate.js"
       - "public/shell.js"
+      - "scripts/normalize-integrated-evidence.mjs"
+      - "scripts/publish-observation-bundle.mjs"
+      - "scripts/reconcile-current-estate.mjs"
+      - "scripts/test-integrated-observation-bundle.mjs"
+      - "scripts/test-integrated-evidence-guards.mjs"
+      - "scripts/test-reconcile-current-estate.mjs"
       - "scripts/seed-canonical-routes-ci.sql"
       - "migrations/**"
       - ".github/workflows/canonical-routes-check.yml"
@@ -15,9 +22,16 @@ on:
       - main
     paths:
       - "src/bootstrap.ts"
+      - "src/integrated-routes.ts"
       - "src/semantic-routes.ts"
       - "public/routes-estate.js"
       - "public/shell.js"
+      - "scripts/normalize-integrated-evidence.mjs"
+      - "scripts/publish-observation-bundle.mjs"
+      - "scripts/reconcile-current-estate.mjs"
+      - "scripts/test-integrated-observation-bundle.mjs"
+      - "scripts/test-integrated-evidence-guards.mjs"
+      - "scripts/test-reconcile-current-estate.mjs"
       - "scripts/seed-canonical-routes-ci.sql"
       - "migrations/**"
       - ".github/workflows/canonical-routes-check.yml"
@@ -42,6 +56,18 @@ jobs:
         run: |
           node --check public/routes-estate.js
           node --check public/shell.js
+          node --check scripts/normalize-integrated-evidence.mjs
+          node --check scripts/publish-observation-bundle.mjs
+          node --check scripts/reconcile-current-estate.mjs
+          node --check scripts/test-integrated-observation-bundle.mjs
+          node --check scripts/test-integrated-evidence-guards.mjs
+          node --check scripts/test-reconcile-current-estate.mjs
+
+      - name: Integrated evidence regressions
+        run: |
+          node scripts/test-integrated-observation-bundle.mjs
+          node scripts/test-integrated-evidence-guards.mjs
+          node scripts/test-reconcile-current-estate.mjs
 
       - name: Apply local D1 migrations
         run: npm run db:migrate:local
@@ -92,7 +118,33 @@ jobs:
           assert any(x.get('peer_queue_manager',{}).get('display_name') == 'QM2' for x in data['transport'])
           assert any(x['state'] == 'dynamic' for x in data['unresolved'])
           assert any(x.get('semantic_warning') for x in data['steps'])
-          print('Canonical route semantics OK')
+          print('Canonical MQ route semantics OK')
+          PY
+
+          dp_search="$(curl --fail --silent "$base/search?q=DP_GATEWAY")"
+          printf '%s\n' "$dp_search" | grep -Fq '"semantic_type": "datapower.service"'
+
+          dp_trace="$(curl --fail --silent "$base/trace?from=dp-service&to=dp-q-target&max_depth=12")"
+          printf '%s\n' "$dp_trace" > /tmp/dp-trace.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/dp-trace.json'))
+          assert data['found'] is True
+          assert data['mode'] == 'configured_semantic_path'
+          assert data['semantics']['configured_route_is_runtime_traversal'] is False
+          assert data['semantics']['qualified_route'] is True
+          assert data['semantics']['derived_epistemic'] == 'derived'
+          assert len(data['steps']) == 1
+          step=data['steps'][0]
+          assert step['semantic_type'] == 'integration.routes_to'
+          assert step['evidence_classes'] == ['configured']
+          assert step['properties']['qualified_route'] is True
+          assert step['properties']['epistemic'] == 'derived'
+          assert step['properties']['deterministic'] is True
+          assert len(step['properties']['qualified_route_chain']) >= 6
+          assert len(data['semantics']['runtime_corroboration']) == 1
+          assert step.get('semantic_warning')
+          print('Qualified DataPower route semantics OK')
           PY
 
           missing="$(curl --fail --silent "$base/trace?from=q-xmit&to=app-consumer")"
