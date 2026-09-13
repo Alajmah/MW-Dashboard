@@ -11,6 +11,7 @@ on:
       - "scripts/normalize-integrated-evidence.mjs"
       - "scripts/publish-observation-bundle.mjs"
       - "scripts/test-integrated-observation-bundle.mjs"
+      - "scripts/test-integrated-evidence-guards.mjs"
       - "scripts/seed-canonical-routes-ci.sql"
       - "migrations/**"
       - ".github/workflows/canonical-routes-check.yml"
@@ -26,6 +27,7 @@ on:
       - "scripts/normalize-integrated-evidence.mjs"
       - "scripts/publish-observation-bundle.mjs"
       - "scripts/test-integrated-observation-bundle.mjs"
+      - "scripts/test-integrated-evidence-guards.mjs"
       - "scripts/seed-canonical-routes-ci.sql"
       - "migrations/**"
       - ".github/workflows/canonical-routes-check.yml"
@@ -53,9 +55,12 @@ jobs:
           node --check scripts/normalize-integrated-evidence.mjs
           node --check scripts/publish-observation-bundle.mjs
           node --check scripts/test-integrated-observation-bundle.mjs
+          node --check scripts/test-integrated-evidence-guards.mjs
 
       - name: Normalize sanitized integrated evidence fixture
-        run: node scripts/test-integrated-observation-bundle.mjs
+        run: |
+          node scripts/test-integrated-observation-bundle.mjs
+          node scripts/test-integrated-evidence-guards.mjs
 
       - name: Apply local D1 migrations
         run: npm run db:migrate:local
