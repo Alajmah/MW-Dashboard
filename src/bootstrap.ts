@@ -1,6 +1,7 @@
 import app from "./index";
 import { handleCurrentObservations } from "./current-observations";
 import { importAuthorizationDenial } from "./import-auth";
+import { handleIntegratedRoutes } from "./integrated-routes";
 import { handleOperationalFindings } from "./operational-findings";
 import { handleSemanticEstate } from "./semantic-estate";
 import { handleSemanticEstateRead } from "./semantic-estate-read";
@@ -109,6 +110,11 @@ export default {
 
     const semanticImpact = await handleSemanticImpact(request, { DB: env.DB });
     if (semanticImpact) return semanticImpact;
+
+    // Phase 2X qualified integration routes are checked before the generic
+    // route walker so all existing route behavior remains unchanged.
+    const integratedRoutes = await handleIntegratedRoutes(request, { DB: env.DB });
+    if (integratedRoutes) return integratedRoutes;
 
     const semanticRoutes = await handleSemanticRoutes(request, { DB: env.DB });
     if (semanticRoutes) return semanticRoutes;
