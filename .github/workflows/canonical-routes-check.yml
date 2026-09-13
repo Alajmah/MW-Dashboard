@@ -10,6 +10,7 @@ on:
       - "public/shell.js"
       - "scripts/normalize-integrated-evidence.mjs"
       - "scripts/publish-observation-bundle.mjs"
+      - "scripts/reconcile-current-estate.mjs"
       - "scripts/test-integrated-observation-bundle.mjs"
       - "scripts/test-integrated-evidence-guards.mjs"
       - "scripts/seed-canonical-routes-ci.sql"
@@ -26,6 +27,7 @@ on:
       - "public/shell.js"
       - "scripts/normalize-integrated-evidence.mjs"
       - "scripts/publish-observation-bundle.mjs"
+      - "scripts/reconcile-current-estate.mjs"
       - "scripts/test-integrated-observation-bundle.mjs"
       - "scripts/test-integrated-evidence-guards.mjs"
       - "scripts/seed-canonical-routes-ci.sql"
@@ -54,6 +56,7 @@ jobs:
           node --check public/shell.js
           node --check scripts/normalize-integrated-evidence.mjs
           node --check scripts/publish-observation-bundle.mjs
+          node --check scripts/reconcile-current-estate.mjs
           node --check scripts/test-integrated-observation-bundle.mjs
           node --check scripts/test-integrated-evidence-guards.mjs
 
