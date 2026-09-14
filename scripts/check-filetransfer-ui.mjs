@@ -27,7 +27,34 @@ assert(view.includes('ibm_mq_mft_agent'), 'workspace must recognize MQ MFT agent
 assert(view.includes('nfs_relationship'), 'workspace must preserve storage/NFS uncertainty');
 assert(view.includes('eft_inbound_site_path'), 'workspace must recognize qualified FTP topology paths semantically');
 assert(view.includes('eft_dmz_pnc'), 'workspace must distinguish PNC bridges from client listener paths');
+
+// Review-hardening: a rendered workspace must belong to exactly one canonical revision.
+assert(view.includes('ESTATE_REVISION_CHANGED'), 'workspace must detect cross-revision canonical reads');
+assert(view.includes('requireEstateRevision(page, revisionId'), 'paginated reads must enforce the anchored estate revision');
+assert(view.includes('requireEstateRevision(finalSummary, revisionId'), 'workspace must re-check the estate revision before rendering');
+assert(view.includes('attempt <= 3'), 'workspace must retry a complete load when the estate changes mid-read');
+
+// Review-hardening: unresolved Site mappings must paginate and remain Site-scoped.
+assert(view.includes('fetchAll("/api/v2/estate/current/unresolved?semantic_type=filetransfer.endpoint"'), 'unresolved File Transfer references must use the pagination loop');
+assert(view.includes('siteIds.has(item.source_entity_id)'), 'unresolved endpoint references must be filtered to EFT Sites before UI counts/status');
+
+// Review-hardening: discover MFT semantically rather than by a naming convention.
+assert(view.includes('fetchEntities("app.application_instance", revisionId)'), 'MFT discovery must start from all application instances');
+assert(!view.includes('fetchEntities("app.application_instance", "AGENT"'), 'MFT discovery must not require AGENT in the display name');
+assert(view.includes('component_class") === "ibm_mq_mft_agent"'), 'MFT discovery must filter on the semantic component class');
+
+// Review-hardening: preserve explicit stopped state and parallel MQ dependencies.
+assert(view.includes('return "Site stopped"'), 'explicitly stopped EFT Sites must render as stopped');
+assert(view.includes('ft-dependency-branch'), 'MFT agent-QM and coordination-QM associations must render as sibling dependencies');
+assert(view.includes('Agent QM</span>') && view.includes('Coordination QM</span>'), 'both configured MFT dependency roles must be visible');
+
+// Review-hardening: failed refreshes must never fall back to cached canonical data.
+assert(view.includes('ftState.loaded = false') && view.includes('ftState.data = null'), 'failed refresh must invalidate cached canonical data');
+assert(view.includes('No cached estate is being shown'), 'all panels must expose a fail-closed refresh error state');
+
 assert(css.includes('.ft-route-lane'), 'File Transfer lane styling is missing');
+assert(css.includes('.ft-dependency-branch'), 'parallel MFT dependency styling is missing');
+assert(css.includes('.ft-error-state'), 'fail-closed load-error styling is missing');
 assert(css.includes('@media'), 'File Transfer view must include responsive behavior');
 
 const referencedIds = new Set([...view.matchAll(/\bfq\("([A-Za-z0-9_-]+)"\)/g)].map((match) => match[1]));
