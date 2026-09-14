@@ -33,6 +33,7 @@ const byRef = new Map(entities.map(x=>[x.ref,x]));
 
 assert(entities.length === 37, `expected 37 entities, got ${entities.length}`);
 assert(relations.length === 30, `expected 30 relations, got ${relations.length}`);
+assert(new Set(relations.map(x=>x.ref)).size === relations.length, 'duplicate relation refs exist');
 assert(first.unresolved_references.length === 2, `expected 2 unresolved references, got ${first.unresolved_references.length}`);
 assert(first.unresolved_references.every(x=>x.state==='unresolved' && x.properties?.unresolved_kind==='site_listener_mapping'), 'unresolved Site mappings are malformed');
 
@@ -60,6 +61,8 @@ for (const route of qualified) {
   assert(pnc.time_scope === 'current', 'PNC corroboration time scope is not current');
   assert(pnc.evidence_class === 'observed', 'PNC corroboration is not observed');
   assert(pnc.independently_corroborated === true, 'PNC corroboration is not independently supported');
+  assert(Array.isArray(pnc.evidence_refs) && new Set(pnc.evidence_refs).size >= 2, 'PNC corroboration lacks two independent evidence refs');
+  assert(!pnc.evidence_refs.includes(route.properties.site_access_evidence.evidence_ref), 'PNC evidence reuses the historical Site-access evidence');
   assert(route.properties?.semantic_warning, 'semantic warning missing');
   assert(byRef.get(route.source_ref)?.semantic_type === 'filetransfer.flow', 'qualified route source is not filetransfer.flow');
   assert(byRef.get(route.target_ref)?.semantic_type === 'filetransfer.endpoint', 'qualified route target is not filetransfer.endpoint');
@@ -114,6 +117,14 @@ const badPnc = clone(fixture);
 badPnc.routes[0].pnc.independently_corroborated = false;
 assert(rejectedWith(badPnc, /independently corroborated PNC/), 'uncorroborated PNC route was accepted');
 
+const onePncSource = clone(fixture);
+onePncSource.routes[0].pnc.corroboration_evidence_refs = ['ev:pnc-a1-dmz'];
+assert(rejectedWith(onePncSource, /at least two distinct corroboration_evidence_refs/), 'single-source PNC evidence was accepted as independent corroboration');
+
+const reusedSiteAccess = clone(fixture);
+reusedSiteAccess.routes[0].pnc.corroboration_evidence_refs = ['ev:pnc-a1-dmz', 'ev:site-access-external-user'];
+assert(rejectedWith(reusedSiteAccess, /independent of Site-access evidence/), 'PNC corroboration reused Site-access evidence');
+
 const historicalPnc = clone(fixture);
 historicalPnc.routes[0].pnc.time_scope = 'historical';
 assert(rejectedWith(historicalPnc, /PNC must set time_scope=current/), 'historical PNC evidence was promoted to current runtime corroboration');
@@ -135,6 +146,17 @@ const reordered = clone(fixture);
 for (const name of ['hosts','servers','sites','routes','storage_paths','mft_agents','gaps']) reordered[name].reverse();
 const reorderedBundle = normalizeProjection(reordered);
 assert(reorderedBundle.run.run_id === first.run.run_id, 'run_id changed only because top-level keyed arrays were reordered');
+assert(JSON.stringify(reorderedBundle) === JSON.stringify(first), 'bundle bytes changed only because top-level keyed arrays were reordered');
+
+const sameQm = clone(fixture);
+sameQm.mft_agents[0].coordination_queue_manager = sameQm.mft_agents[0].agent_queue_manager;
+const sameQmBundle = normalizeProjection(sameQm);
+const sameQmEntities = new Map(sameQmBundle.entities.map(x=>[x.ref,x]));
+const prodAgent = sameQmBundle.entities.find(x=>x.semantic_type==='app.application_instance' && x.display_name==='MFTPROD.AGENT01');
+const sameQmDeps = sameQmBundle.relations.filter(x=>x.semantic_type==='network.connects_to' && x.source_ref===prodAgent.ref && sameQmEntities.get(x.target_ref)?.semantic_type==='mq.queue_manager');
+assert(sameQmDeps.length === 2, 'same-QM MFT agent lost one dependency role');
+assert(new Set(sameQmDeps.map(x=>x.ref)).size === 2, 'same-QM MFT dependency relations share an identity');
+assert(new Set(sameQmDeps.map(x=>x.properties?.dependency_role)).size === 2, 'same-QM MFT dependency roles were collapsed');
 
 console.log(JSON.stringify({
   status: 'PASS',
