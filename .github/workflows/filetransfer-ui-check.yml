@@ -1,0 +1,38 @@
+name: File Transfer UI check
+
+on:
+  pull_request:
+    paths:
+      - "public/filetransfer-view.js"
+      - "public/filetransfer-view.css"
+      - "public/shell.js"
+      - "scripts/check-filetransfer-ui.mjs"
+      - ".github/workflows/filetransfer-ui-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/filetransfer-view.js"
+      - "public/filetransfer-view.css"
+      - "public/shell.js"
+      - "scripts/check-filetransfer-ui.mjs"
+      - ".github/workflows/filetransfer-ui-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: JavaScript syntax
+        run: |
+          node --check public/filetransfer-view.js
+          node --check public/shell.js
+          node --check scripts/check-filetransfer-ui.mjs
+
+      - name: Evidence semantics contract
+        run: node scripts/check-filetransfer-ui.mjs
