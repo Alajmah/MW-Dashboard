@@ -37,6 +37,12 @@ async function unresolvedFor(db:D1Database,estateId:string,ids:string[]):Promise
   return (result.results??[]).map((row)=>({...row,candidate_entity_ids:parseJson(row.candidate_entity_ids_json,[]),source_ids:parseJson(row.source_ids_json,[]),candidate_entity_ids_json:undefined,source_ids_json:undefined}));
 }
 
+function transferCompletion(properties:JsonMap):"observed"|"not_observed"|"unknown"{
+  if(properties.runtime_transfer_completion===true)return "observed";
+  if(properties.runtime_transfer_completion===false)return "not_observed";
+  return "unknown";
+}
+
 export async function handleIntegratedRoutes(request:Request,env:IntegratedRoutesEnv):Promise<Response|null>{
   const url=new URL(request.url); if(request.method!=="GET"||url.pathname!=="/api/v2/routes/trace")return null;
   const from=url.searchParams.get("from")?.trim(); const to=url.searchParams.get("to")?.trim(); if(!from||!to)return null;
@@ -46,19 +52,64 @@ export async function handleIntegratedRoutes(request:Request,env:IntegratedRoute
     const relation=await directIntegratedRoute(env.DB,estateId,from,to); if(!relation)return null;
     const [source,target]=await Promise.all([entity(env.DB,estateId,from),entity(env.DB,estateId,to)]); if(!source||!target)return null;
     const properties=(relation.properties??{}) as JsonMap;
-    // Do not take ownership of generic integration routes. Phase 2X is only the
-    // explicitly qualified DataPower -> MQ queue projection; everything else
-    // must continue through the generic semantic route engine.
-    if(source.semantic_type!=="datapower.service"||target.semantic_type!=="mq.queue"||properties.qualified_route!==true)return null;
+    const isDataPower=source.semantic_type==="datapower.service"&&target.semantic_type==="mq.queue"&&properties.qualified_route===true;
+    const isFileTransfer=source.semantic_type==="filetransfer.flow"&&target.semantic_type==="filetransfer.endpoint"&&properties.qualified_route===true&&properties.route_kind==="eft_inbound_site_path";
+    // Only explicitly qualified cross-technology projections are owned here.
+    // Generic integration relations continue through the semantic route engine.
+    if(!isDataPower&&!isFileTransfer)return null;
+
     const evidenceClasses=Array.isArray(relation.evidence_classes)?relation.evidence_classes:[];
-    const semanticWarning=typeof properties.semantic_warning==="string"?properties.semantic_warning:"Configured integration route evidence does not prove a specific runtime message traversal.";
+    const defaultWarning=isFileTransfer
+      ? "This is an inferred topology route composed from historical Site-access evidence plus current listener and independently corroborated PNC observations. It is not current Site traversal or completed file transfer proof."
+      : "Configured integration route evidence does not prove a specific runtime message traversal.";
+    const semanticWarning=typeof properties.semantic_warning==="string"?properties.semantic_warning:defaultWarning;
     const unresolved=await unresolvedFor(env.DB,estateId,[from,to]);
+    const estateMetadata={estate_revision_id:estateId,source_set_hash:estate.source_set_hash,source_revision_ids:parseJson(estate.source_revision_ids_json,[]),built_at:estate.built_at,activated_at:estate.activated_at,quality:parseJson(estate.quality_json,{})};
+
+    if(isFileTransfer){
+      const completion=transferCompletion(properties);
+      return reply({
+        found:true,
+        mode:"configured_semantic_path",
+        source,
+        target,
+        nodes:[source,target],
+        steps:[{
+          relation_id:relation.relation_id,
+          semantic_type:"integration.routes_to",
+          label:"Qualified topology path",
+          reversed:false,
+          from:source,
+          to:target,
+          evidence_classes:evidenceClasses,
+          properties,
+          semantic_warning:semanticWarning,
+        }],
+        transport:[],
+        unresolved,
+        estate:estateMetadata,
+        semantics:{
+          runtime_access_is_activity:false,
+          configured_route_is_runtime_traversal:false,
+          qualified_route:true,
+          route_domain:"file_transfer",
+          derived_epistemic:properties.epistemic??null,
+          site_access_evidence:properties.site_access_evidence??null,
+          current_listener_evidence:properties.current_listener_evidence??null,
+          runtime_corroboration:properties.runtime_corroboration??[],
+          runtime_transfer_completion:typeof properties.runtime_transfer_completion==="boolean"?properties.runtime_transfer_completion:null,
+          transfer_completion:completion,
+        },
+        explanation:"An evidence-qualified FTP topology path is supported by the current canonical estate. Historical Site access, current listener evidence, and independently corroborated PNC runtime connectivity remain separate evidence components. Transfer completion is not claimed unless explicitly observed.",
+      });
+    }
+
     return reply({
       found:true, mode:"configured_semantic_path", source, target, nodes:[source,target],
       steps:[{relation_id:relation.relation_id,semantic_type:"integration.routes_to",label:"Routes to",reversed:false,from:source,to:target,evidence_classes:evidenceClasses,properties,semantic_warning:semanticWarning}],
       transport:[], unresolved,
-      estate:{estate_revision_id:estateId,source_set_hash:estate.source_set_hash,source_revision_ids:parseJson(estate.source_revision_ids_json,[]),built_at:estate.built_at,activated_at:estate.activated_at,quality:parseJson(estate.quality_json,{})},
-      semantics:{runtime_access_is_activity:false,configured_route_is_runtime_traversal:false,qualified_route:true,derived_epistemic:properties.epistemic??null,runtime_corroboration:properties.runtime_corroboration??[]},
+      estate:estateMetadata,
+      semantics:{runtime_access_is_activity:false,configured_route_is_runtime_traversal:false,qualified_route:true,route_domain:"messaging",derived_epistemic:properties.epistemic??null,runtime_corroboration:properties.runtime_corroboration??[]},
       explanation:"A deterministic configured DataPower route is supported by the current canonical estate. Static route evidence remains distinct from runtime MQ connectivity evidence."
     });
   }catch(error){console.error("integrated route query failed",error); return reply({detail:"Integrated route query failed",code:"INTEGRATED_ROUTE_QUERY_FAILED"},500);}
