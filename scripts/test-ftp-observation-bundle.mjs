@@ -24,7 +24,7 @@ assert(validateBundle(first) === true, 'bundle validation failed');
 assert(JSON.stringify(first) === JSON.stringify(second), 'normalization is not deterministic');
 assert(first.schema_version === 'osi.observation.bundle/v2', 'wrong output schema');
 assert(first.run.normalizer_version === '3.1.0', 'wrong normalizer version');
-assert(first.run.collector_version === '0.4.0', 'wrong adapter version');
+assert(first.run.collector_version === '0.5.0', 'wrong adapter version');
 assert(first.run.metadata?.historical_logs_promoted_to_runtime === false, 'historical evidence promotion guard missing');
 
 const entities = first.entities;
@@ -145,6 +145,14 @@ const unsupportedListenerResolution = clone(fixture);
 unsupportedListenerResolution.sites.find(x=>x.key==='site-external-user').listener_resolution = 'resolved';
 assert(rejectedWith(unsupportedListenerResolution, /listener_resolution=qualified-inferred/), 'unsupported listener resolution was accepted as qualified');
 
+const missingRouteStatus = clone(fixture);
+delete missingRouteStatus.routes[0].status;
+assert(rejectedWith(missingRouteStatus, /status must be qualified/), 'missing route status was promoted to qualified');
+
+const unqualifiedRouteStatus = clone(fixture);
+unqualifiedRouteStatus.routes[0].status = 'unqualified';
+assert(rejectedWith(unqualifiedRouteStatus, /status must be qualified/), 'explicit unqualified route was promoted to qualified');
+
 const stoppedSite = clone(fixture);
 stoppedSite.sites.find(x=>x.key==='site-external-user').status = 'stopped';
 assert(rejectedWith(stoppedSite, /unless status=started/), 'stopped Site was exposed as a qualified route');
@@ -160,6 +168,14 @@ assert(rejectedWith(onePncSource, /at least two provenance-bearing corroboration
 const duplicatePncSourceKind = clone(fixture);
 duplicatePncSourceKind.routes[0].pnc.corroboration[1].source_kind = duplicatePncSourceKind.routes[0].pnc.corroboration[0].source_kind;
 assert(rejectedWith(duplicatePncSourceKind, /at least two distinct runtime source kinds/), 'same-kind evidence was accepted as independent PNC corroboration');
+
+const caseVariantPncSourceKind = clone(fixture);
+caseVariantPncSourceKind.routes[0].pnc.corroboration[1].source_kind = caseVariantPncSourceKind.routes[0].pnc.corroboration[0].source_kind.toUpperCase();
+assert(rejectedWith(caseVariantPncSourceKind, /at least two distinct runtime source kinds/), 'case-only source-kind variants were accepted as independent PNC corroboration');
+
+const unsupportedPncSourceKind = clone(fixture);
+unsupportedPncSourceKind.routes[0].pnc.corroboration[1].source_kind = 'listener_runtime';
+assert(rejectedWith(unsupportedPncSourceKind, /source_kind is unsupported/), 'unsupported PNC source kind was accepted');
 
 const listenerMasqueradingAsPnc = clone(fixture);
 listenerMasqueradingAsPnc.routes[0].pnc.corroboration[1].kind = 'listener_runtime_state';
@@ -200,6 +216,10 @@ const nestedOnlyBundle = normalizeProjection(nestedOnlyReordered);
 assert(nestedOnlyBundle.run.run_id === first.run.run_id, 'run_id changed because nested PNC corroboration order changed');
 assert(JSON.stringify(nestedOnlyBundle) === JSON.stringify(first), 'bundle bytes changed because nested PNC corroboration order changed');
 
+const overlongGapReason = clone(fixture);
+overlongGapReason.gaps.find(x=>x.site_key==='site-external-ftps').reason = 'x'.repeat(501);
+assert(rejectedWith(overlongGapReason, /reason must not exceed 500 characters/), 'overlong unresolved reason passed normalization');
+
 const sharedGatewayEndpoint = clone(fixture);
 const sharedRouteA = sharedGatewayEndpoint.routes[0];
 const sharedRouteB = sharedGatewayEndpoint.routes[1];
@@ -218,6 +238,18 @@ sharedGatewayReordered.routes.reverse();
 const sharedGatewayReorderedBundle = normalizeProjection(sharedGatewayReordered);
 assert(sharedGatewayReorderedBundle.run.run_id === sharedGatewayBundle.run.run_id, 'shared gateway endpoint run_id changed only because route input order changed');
 assert(JSON.stringify(sharedGatewayReorderedBundle) === JSON.stringify(sharedGatewayBundle), 'shared gateway endpoint provenance changed only because route input order changed');
+
+const sharedMftQm = clone(fixture);
+sharedMftQm.mft_agents[0].evidence_ref = 'ev:mft-shared';
+sharedMftQm.mft_agents[1].evidence_ref = 'ev:mft-shared';
+sharedMftQm.mft_agents[0].agent_queue_manager = 'QM_SHARED';
+sharedMftQm.mft_agents[1].coordination_queue_manager = 'QM_SHARED';
+const sharedMftBundle = normalizeProjection(sharedMftQm);
+const sharedMftReordered = clone(sharedMftQm);
+sharedMftReordered.mft_agents.reverse();
+const sharedMftReorderedBundle = normalizeProjection(sharedMftReordered);
+assert(sharedMftReorderedBundle.run.run_id === sharedMftBundle.run.run_id, 'shared MFT QM run_id changed only because agent input order changed');
+assert(JSON.stringify(sharedMftReorderedBundle) === JSON.stringify(sharedMftBundle), 'shared MFT QM anchor provenance changed only because agent input order changed');
 
 const sameQm = clone(fixture);
 sameQm.mft_agents[0].coordination_queue_manager = sameQm.mft_agents[0].agent_queue_manager;

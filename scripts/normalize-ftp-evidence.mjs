@@ -5,9 +5,10 @@ import { pathToFileURL } from 'node:url';
 
 const INPUT_SCHEMA = 'osi.ftp.projection/v1';
 const OUTPUT_SCHEMA = 'osi.observation.bundle/v2';
-const ADAPTER_VERSION = '0.4.0';
+const ADAPTER_VERSION = '0.5.0';
 const NORMALIZER_VERSION = '3.1.0';
 const IMPORT_COVERAGE_MODES = new Set(['complete', 'point_in_time', 'partial', 'failed', 'not_collected']);
+const PNC_RUNTIME_SOURCE_KINDS = new Set(['dmz_gateway_runtime', 'eft_runtime']);
 const FORBIDDEN_INPUT_KEY = /(password|passwd|secret|token|credential|private[_-]?key|certificate[_-]?content|service[_-]?account|command[_-]?line)/i;
 
 function fail(message) { throw new Error(message); }
@@ -93,6 +94,7 @@ class Builder {
     if (!this.entityType.has(sourceRef)) fail(`unresolved source endpoint missing: ${semanticType}`);
     if (typeof reason !== 'string' || !reason.trim()) fail(`unresolved ${semanticType} reason is required`);
     const normalizedReason = reason.trim();
+    if (normalizedReason.length > 500) fail(`unresolved ${semanticType} reason must not exceed 500 characters`);
     const normalizedProperties = canonicalize(properties);
     const ref = stableRef('unr', sourceRef, semanticType, state, normalizedReason, stableStringify(normalizedProperties));
     this.bundle.unresolved_references.push({
@@ -143,6 +145,12 @@ function byKey(items, name) {
 function requireEvidence(item, label) {
   if (typeof item?.evidence_ref !== 'string' || !item.evidence_ref.trim()) fail(`${label} evidence_ref is required`);
   return item.evidence_ref.trim();
+}
+function requirePncSourceKind(value, label) {
+  if (typeof value !== 'string' || !value.trim()) fail(`${label} source_kind is required`);
+  const normalized = value.trim().toLowerCase();
+  if (!PNC_RUNTIME_SOURCE_KINDS.has(normalized)) fail(`${label} source_kind is unsupported: ${value}`);
+  return normalized;
 }
 function requireCurrentObserved(item, label) {
   if (item?.time_scope !== 'current') fail(`${label} must set time_scope=current`);
@@ -329,6 +337,7 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
     if (!site) fail(`route ${route.key} references unknown site ${route.site_key}`);
     if (site.status !== 'started') fail(`route ${route.key} cannot qualify Site ${site.name} unless status=started`);
     if (site.listener_resolution !== 'qualified-inferred') fail(`route ${route.key} cannot qualify Site ${site.name} unless listener_resolution=qualified-inferred`);
+    if (route.status !== 'qualified') fail(`route ${route.key} status must be qualified`);
     const gateway = serverByKey.get(route.gateway_server_key);
     if (!gateway) fail(`route ${route.key} references unknown gateway ${route.gateway_server_key}`);
     if (gateway.role !== 'dmz_gateway') fail(`route ${route.key} gateway must have role=dmz_gateway`);
@@ -354,14 +363,14 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
       requireCurrentObserved(item, label);
       const evidenceRef = requireEvidence(item, label);
       if (item.kind !== 'pnc_runtime_connectivity') fail(`${label} kind must be pnc_runtime_connectivity`);
-      if (typeof item.source_kind !== 'string' || !item.source_kind.trim()) fail(`${label} source_kind is required`);
+      const sourceKind = requirePncSourceKind(item.source_kind, label);
       if (item.endpoint_host !== route.pnc.host) fail(`${label} endpoint_host must match route PNC host`);
       requirePort(item.endpoint_port, `${label} endpoint_port`);
       if (item.endpoint_port !== route.pnc.port) fail(`${label} endpoint_port must match route PNC port`);
       if (evidenceRef === siteAccessEvidenceRef) fail(`route ${route.key} PNC corroboration must be independent of Site-access evidence`);
       return canonicalize({
         kind: 'pnc_runtime_connectivity',
-        source_kind: item.source_kind.trim(),
+        source_kind: sourceKind,
         time_scope: 'current',
         evidence_class: 'observed',
         evidence_ref: evidenceRef,
@@ -403,7 +412,7 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
       name: route.name,
     }, route.name, generatedAt, 'inferred', {
       evidenceRef: siteAccessEvidenceRef,
-      status: route.status ?? 'qualified',
+      status: route.status,
       properties: {
         flow_kind: 'eft_inbound_site_path',
         site_name: site.name,
@@ -514,7 +523,7 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
   }
 
   const mftAgentRefs = [];
-  for (const agent of mftAgents) {
+  for (const agent of sortByKey(mftAgents)) {
     requireCurrentObserved(agent, `MFT agent ${agent.key}`);
     const evidenceRef = requireEvidence(agent, `MFT agent ${agent.key}`);
     if (!hostRefs.has(agent.host_key)) fail(`MFT agent ${agent.key} references unknown host ${agent.host_key}`);
@@ -638,6 +647,7 @@ export function validateBundle(bundle) {
       fail(`illegal relation ${relation.semantic_type}: ${source.semantic_type} -> ${target.semantic_type}`);
     }
     if (relation.semantic_type === 'integration.routes_to') {
+      if (source.status !== 'qualified') fail('FTP qualified topology route source must have status=qualified');
       if (relation.evidence_class !== 'inferred') fail('FTP qualified topology route must remain inferred evidence');
       if (relation.properties?.qualified_route !== true) fail('FTP route must set qualified_route=true');
       if (relation.properties?.epistemic !== 'inferred') fail('FTP route epistemic must be inferred');
@@ -656,8 +666,9 @@ export function validateBundle(bundle) {
         if (source?.kind !== 'pnc_runtime_connectivity') fail('FTP route PNC source kind is invalid');
         if (source?.time_scope !== 'current' || source?.evidence_class !== 'observed') fail('FTP route PNC source provenance is invalid');
         if (!source?.source_kind || !source?.evidence_ref) fail('FTP route PNC source metadata is incomplete');
+        const canonicalSourceKind = requirePncSourceKind(source.source_kind, 'FTP route PNC source');
         if (source.evidence_ref === relation.properties?.site_access_evidence?.evidence_ref) fail('FTP PNC corroboration must remain independent of Site-access evidence');
-        sourceKinds.add(source.source_kind);
+        sourceKinds.add(canonicalSourceKind);
         pncEvidenceRefs.add(source.evidence_ref);
       }
       if (sourceKinds.size < 2 || pncEvidenceRefs.size < 2) fail('FTP route PNC corroboration is not independent');
@@ -671,6 +682,7 @@ export function validateBundle(bundle) {
     if (!unresolvedStates.has(unresolved.state)) fail(`unsupported unresolved state ${unresolved.state}`);
     if (unresolved.evidence_class && !evidenceClasses.has(unresolved.evidence_class)) fail(`unsupported unresolved evidence class ${unresolved.evidence_class}`);
     if (typeof unresolved.reason !== 'string' || !unresolved.reason.trim()) fail(`unresolved reason missing ${unresolved.ref}`);
+    if (unresolved.reason.trim().length > 500) fail(`unresolved reason exceeds import limit ${unresolved.ref}`);
   }
   const serialized = JSON.stringify(bundle).toLowerCase();
   for (const token of ['password','passwd','mftcredentials.xml','command_line":"','service_account']) {
