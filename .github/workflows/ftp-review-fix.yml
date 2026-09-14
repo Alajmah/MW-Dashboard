@@ -37,9 +37,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/ftp-review-fix.yml .github/scripts/ftp-review-fix.py .github/scripts/repair-ftp-review-fix.py
+          git rm -f .github/workflows/ftp-review-fix.yml .github/scripts/ftp-review-fix.py .github/scripts/repair-ftp-review-fix.py
           git add scripts/normalize-ftp-evidence.mjs scripts/test-ftp-observation-bundle.mjs scripts/fixtures/ftp-projection-sanitized.json docs/phase-ftp-evidence-integration.md
           git commit -m "Phase FTP: harden review provenance boundaries"
           git push origin HEAD:ftp-evidence-integration
 
-# retry after Site-resolution guard correction
+# final retry: validated patch; force-remove modified temporary patcher
