@@ -1,0 +1,275 @@
+#!/usr/bin/env node
+import { readFile } from 'node:fs/promises';
+import { normalizeProjection, validateBundle } from './normalize-ftp-evidence.mjs';
+
+function assert(condition, message) { if (!condition) throw new Error(message); }
+function clone(value) { return JSON.parse(JSON.stringify(value)); }
+function rejectedWith(input, pattern) {
+  try { normalizeProjection(input); }
+  catch (error) { return pattern.test(String(error)); }
+  return false;
+}
+
+const fixtureUrl = new URL('./fixtures/ftp-projection-sanitized.json', import.meta.url);
+const raw = await readFile(fixtureUrl, 'utf8');
+const fixture = JSON.parse(raw);
+
+for (const forbidden of [/SJEDITB/i, /10\.132\./, /217\.12\./, /SVFTA/i, /SVFTC/i, /SVFTP/i]) {
+  assert(!forbidden.test(raw), `sanitized fixture contains a real-estate marker: ${forbidden}`);
+}
+
+const first = normalizeProjection(fixture);
+const second = normalizeProjection(clone(fixture));
+assert(validateBundle(first) === true, 'bundle validation failed');
+assert(JSON.stringify(first) === JSON.stringify(second), 'normalization is not deterministic');
+assert(first.schema_version === 'osi.observation.bundle/v2', 'wrong output schema');
+assert(first.run.normalizer_version === '3.1.0', 'wrong normalizer version');
+assert(first.run.collector_version === '0.5.0', 'wrong adapter version');
+assert(first.run.metadata?.historical_logs_promoted_to_runtime === false, 'historical evidence promotion guard missing');
+
+const entities = first.entities;
+const relations = first.relations;
+const byRef = new Map(entities.map(x=>[x.ref,x]));
+
+assert(entities.length === 37, `expected 37 entities, got ${entities.length}`);
+assert(relations.length === 30, `expected 30 relations, got ${relations.length}`);
+assert(new Set(relations.map(x=>x.ref)).size === relations.length, 'duplicate relation refs exist');
+assert(first.unresolved_references.length === 2, `expected 2 unresolved references, got ${first.unresolved_references.length}`);
+assert(first.unresolved_references.every(x=>x.state==='unresolved' && x.properties?.unresolved_kind==='site_listener_mapping'), 'unresolved Site mappings are malformed');
+assert(first.unresolved_references.every(x=>typeof x.reason==='string' && x.reason.length>0), 'unresolved reasons are not emitted in the import-contract field');
+assert(first.unresolved_references.some(x=>x.reason.includes('historical activity')), 'gap-specific unresolved reason was lost');
+
+const importCoverageModes = new Set(['complete','point_in_time','partial','failed','not_collected']);
+assert(first.coverage.every(x=>importCoverageModes.has(x.mode)), 'bundle contains a coverage mode rejected by semantic-import');
+assert(first.coverage.some(x=>x.object_class==='filetransfer.endpoint' && x.mode==='partial'), 'endpoint coverage should remain partial while Sites are unresolved');
+
+const sites = entities.filter(x=>x.semantic_type==='filetransfer.endpoint' && x.properties?.endpoint_kind==='eft_site');
+assert(sites.length === 5, `expected 5 EFT Site endpoints, got ${sites.length}`);
+
+const qualified = relations.filter(x=>x.semantic_type==='integration.routes_to');
+assert(qualified.length === 3, `expected 3 qualified inbound Site paths, got ${qualified.length}`);
+for (const route of qualified) {
+  assert(route.evidence_class === 'inferred', 'qualified FTP topology route must remain inferred');
+  assert(route.properties?.qualified_route === true, 'qualified_route flag missing');
+  assert(route.properties?.epistemic === 'inferred', 'FTP route epistemic must be inferred');
+  assert(route.properties?.runtime_transfer_completion === false, 'Site path was promoted to transfer completion');
+  assert(route.properties?.deterministic === true, 'route derivation must be deterministic');
+  assert(route.properties?.site_access_evidence?.time_scope === 'historical', 'historical Site-access time scope was flattened');
+  assert(route.properties?.site_access_evidence?.evidence_class === 'observed', 'historical Site-access evidence class changed');
+  assert(route.properties?.current_listener_evidence?.time_scope === 'current', 'listener evidence is not current');
+  assert(route.properties?.current_listener_evidence?.evidence_class === 'observed', 'listener evidence is not observed');
+  assert(Array.isArray(route.properties?.runtime_corroboration) && route.properties.runtime_corroboration.length === 1, 'PNC corroboration missing');
+  const pnc = route.properties.runtime_corroboration[0];
+  assert(pnc.time_scope === 'current', 'PNC corroboration time scope is not current');
+  assert(pnc.evidence_class === 'observed', 'PNC corroboration is not observed');
+  assert(pnc.independently_corroborated === true, 'PNC corroboration is not independently supported');
+  assert(Array.isArray(pnc.sources) && pnc.sources.length >= 2, 'PNC provenance-bearing sources missing');
+  assert(new Set(pnc.sources.map(x=>x.source_kind)).size >= 2, 'PNC sources are not independent by source kind');
+  assert(new Set(pnc.sources.map(x=>x.evidence_ref)).size >= 2, 'PNC sources are not independent by evidence ref');
+  assert(pnc.sources.every(x=>x.kind==='pnc_runtime_connectivity'), 'non-PNC evidence was admitted as PNC corroboration');
+  assert(pnc.sources.every(x=>x.time_scope==='current' && x.evidence_class==='observed'), 'PNC source provenance was flattened');
+  assert(!pnc.sources.some(x=>x.evidence_ref===route.properties.site_access_evidence.evidence_ref), 'PNC evidence reuses the historical Site-access evidence');
+  assert(route.properties?.semantic_warning, 'semantic warning missing');
+  assert(byRef.get(route.source_ref)?.semantic_type === 'filetransfer.flow', 'qualified route source is not filetransfer.flow');
+  assert(byRef.get(route.target_ref)?.semantic_type === 'filetransfer.endpoint', 'qualified route target is not filetransfer.endpoint');
+}
+
+for (const unresolvedName of ['External FTPS','Internal User']) {
+  const site = sites.find(x=>x.display_name===unresolvedName);
+  assert(site, `missing unresolved Site ${unresolvedName}`);
+  assert(site.properties?.listener_resolution === 'unresolved', `${unresolvedName} was silently resolved`);
+  assert(!qualified.some(x=>x.target_ref===site.ref), `${unresolvedName} was promoted to a qualified route`);
+  assert(first.unresolved_references.some(x=>x.source_ref===site.ref), `${unresolvedName} is not represented as an unresolved reference`);
+}
+
+const pncEndpoints = entities.filter(x=>x.semantic_type==='filetransfer.endpoint' && x.properties?.endpoint_kind==='peer_notification_channel');
+assert(pncEndpoints.length === 3, `expected 3 PNC endpoints, got ${pncEndpoints.length}`);
+
+const mftAgents = entities.filter(x=>x.semantic_type==='app.application_instance' && x.properties?.component_class==='ibm_mq_mft_agent');
+assert(mftAgents.length === 2, `expected 2 MFT agents, got ${mftAgents.length}`);
+for (const agent of mftAgents) {
+  assert(agent.evidence_class === 'observed', 'MFT agent should be observed current state');
+  assert(agent.properties?.transfer_completion_proven === false, 'MFT agent projected transfer completion');
+  assert(agent.properties?.command_line_collected === false, 'MFT command line should not be retained');
+  const deps = relations.filter(x=>x.semantic_type==='network.connects_to' && x.source_ref===agent.ref && byRef.get(x.target_ref)?.semantic_type==='mq.queue_manager');
+  assert(deps.length === 2, `expected agent+coordination QM anchors for ${agent.display_name}`);
+  assert(deps.every(x=>x.evidence_class==='configured'), 'MFT QM association must remain configured');
+  assert(deps.every(x=>x.properties?.network_endpoint_observed===false), 'MFT logical dependency was promoted to observed network connectivity');
+}
+
+const storage = entities.filter(x=>x.semantic_type==='filetransfer.endpoint' && x.properties?.endpoint_kind==='filesystem_path');
+assert(storage.length === 2, `expected 2 storage paths, got ${storage.length}`);
+assert(storage.every(x=>x.properties?.nfs_relationship==='unresolved'), 'local storage was incorrectly promoted to NFS');
+assert(storage.every(x=>x.properties?.contents_enumerated===false), 'payload directory enumeration claim is wrong');
+
+const serialized = JSON.stringify(first).toLowerCase();
+for (const forbidden of ['password','passwd','mftcredentials.xml','service_account','command_line":"']) {
+  assert(!serialized.includes(forbidden), `bundle contains disallowed sensitive material: ${forbidden}`);
+}
+
+const unsafe = clone(fixture);
+unsafe.mft_agents[0].password = 'should-never-pass';
+assert(rejectedWith(unsafe, /forbidden sensitive input key/), 'sensitive input guard did not fail closed');
+
+const missingTimeScope = clone(fixture);
+delete missingTimeScope.hosts[0].time_scope;
+assert(rejectedWith(missingTimeScope, /must set time_scope=current/), 'missing current time scope was silently promoted');
+
+const missingEvidenceClass = clone(fixture);
+delete missingEvidenceClass.sites[0].evidence_class;
+assert(rejectedWith(missingEvidenceClass, /must use evidence_class=observed/), 'missing observed evidence class was silently promoted');
+
+const blankEvidenceRef = clone(fixture);
+blankEvidenceRef.routes[0].listener.evidence_ref = '   ';
+assert(rejectedWith(blankEvidenceRef, /evidence_ref is required/), 'blank evidence reference was accepted');
+
+const missingUnroutedSiteStatus = clone(fixture);
+delete missingUnroutedSiteStatus.sites.find(x=>x.key==='site-internal-user').status;
+assert(rejectedWith(missingUnroutedSiteStatus, /status must be started or stopped/), 'missing Site status was promoted to started');
+
+const unknownUnroutedSiteStatus = clone(fixture);
+unknownUnroutedSiteStatus.sites.find(x=>x.key==='site-internal-user').status = 'unknown';
+assert(rejectedWith(unknownUnroutedSiteStatus, /status must be started or stopped/), 'unknown Site status was promoted to started');
+
+const stoppedUnroutedSite = clone(fixture);
+stoppedUnroutedSite.sites.find(x=>x.key==='site-internal-user').status = 'stopped';
+const stoppedUnroutedBundle = normalizeProjection(stoppedUnroutedSite);
+const stoppedUnroutedEntity = stoppedUnroutedBundle.entities.find(x=>x.semantic_type==='filetransfer.endpoint' && x.display_name==='Internal User');
+assert(stoppedUnroutedEntity?.status === 'stopped' && stoppedUnroutedEntity?.properties?.site_started === false, 'explicit stopped Site state was not preserved');
+
+const missingListenerResolution = clone(fixture);
+delete missingListenerResolution.sites.find(x=>x.key==='site-external-user').listener_resolution;
+assert(rejectedWith(missingListenerResolution, /listener_resolution=qualified-inferred/), 'missing listener resolution was accepted as qualified');
+
+const unsupportedListenerResolution = clone(fixture);
+unsupportedListenerResolution.sites.find(x=>x.key==='site-external-user').listener_resolution = 'resolved';
+assert(rejectedWith(unsupportedListenerResolution, /listener_resolution=qualified-inferred/), 'unsupported listener resolution was accepted as qualified');
+
+const missingRouteStatus = clone(fixture);
+delete missingRouteStatus.routes[0].status;
+assert(rejectedWith(missingRouteStatus, /status must be qualified/), 'missing route status was promoted to qualified');
+
+const unqualifiedRouteStatus = clone(fixture);
+unqualifiedRouteStatus.routes[0].status = 'unqualified';
+assert(rejectedWith(unqualifiedRouteStatus, /status must be qualified/), 'explicit unqualified route was promoted to qualified');
+
+const stoppedSite = clone(fixture);
+stoppedSite.sites.find(x=>x.key==='site-external-user').status = 'stopped';
+assert(rejectedWith(stoppedSite, /unless status=started/), 'stopped Site was exposed as a qualified route');
+
+const badPnc = clone(fixture);
+badPnc.routes[0].pnc.independently_corroborated = false;
+assert(rejectedWith(badPnc, /independently corroborated PNC/), 'uncorroborated PNC route was accepted');
+
+const onePncSource = clone(fixture);
+onePncSource.routes[0].pnc.corroboration = [onePncSource.routes[0].pnc.corroboration[0]];
+assert(rejectedWith(onePncSource, /at least two provenance-bearing corroboration records/), 'single-source PNC evidence was accepted as independent corroboration');
+
+const duplicatePncSourceKind = clone(fixture);
+duplicatePncSourceKind.routes[0].pnc.corroboration[1].source_kind = duplicatePncSourceKind.routes[0].pnc.corroboration[0].source_kind;
+assert(rejectedWith(duplicatePncSourceKind, /at least two distinct runtime source kinds/), 'same-kind evidence was accepted as independent PNC corroboration');
+
+const caseVariantPncSourceKind = clone(fixture);
+caseVariantPncSourceKind.routes[0].pnc.corroboration[1].source_kind = caseVariantPncSourceKind.routes[0].pnc.corroboration[0].source_kind.toUpperCase();
+assert(rejectedWith(caseVariantPncSourceKind, /at least two distinct runtime source kinds/), 'case-only source-kind variants were accepted as independent PNC corroboration');
+
+const unsupportedPncSourceKind = clone(fixture);
+unsupportedPncSourceKind.routes[0].pnc.corroboration[1].source_kind = 'listener_runtime';
+assert(rejectedWith(unsupportedPncSourceKind, /source_kind is unsupported/), 'unsupported PNC source kind was accepted');
+
+const listenerMasqueradingAsPnc = clone(fixture);
+listenerMasqueradingAsPnc.routes[0].pnc.corroboration[1].kind = 'listener_runtime_state';
+listenerMasqueradingAsPnc.routes[0].pnc.corroboration[1].evidence_ref = listenerMasqueradingAsPnc.routes[0].listener.evidence_ref;
+assert(rejectedWith(listenerMasqueradingAsPnc, /kind must be pnc_runtime_connectivity/), 'listener evidence was accepted as PNC corroboration');
+
+const reusedSiteAccess = clone(fixture);
+reusedSiteAccess.routes[0].pnc.corroboration[1].evidence_ref = reusedSiteAccess.routes[0].site_access.evidence_ref;
+assert(rejectedWith(reusedSiteAccess, /independent of Site-access evidence/), 'PNC corroboration reused Site-access evidence');
+
+const historicalPnc = clone(fixture);
+historicalPnc.routes[0].pnc.corroboration[1].time_scope = 'historical';
+assert(rejectedWith(historicalPnc, /must set time_scope=current/), 'historical PNC evidence was promoted to current runtime corroboration');
+
+const currentSiteAccess = clone(fixture);
+currentSiteAccess.routes[0].site_access.time_scope = 'current';
+assert(rejectedWith(currentSiteAccess, /Site access must set time_scope=historical/), 'Site-access historical boundary was lost');
+
+const badGatewayRole = clone(fixture);
+badGatewayRole.routes[0].gateway_server_key = 'eft:EFT01';
+assert(rejectedWith(badGatewayRole, /gateway must have role=dmz_gateway/), 'route was allowed to attach a gateway listener to a non-DMZ server');
+
+const mutatedContent = clone(fixture);
+mutatedContent.routes[0].listener.port = 2222;
+const mutatedBundle = normalizeProjection(mutatedContent);
+assert(mutatedBundle.run.run_id !== first.run.run_id, 'run_id did not change when semantic content changed');
+
+const reordered = clone(fixture);
+for (const name of ['hosts','servers','sites','routes','storage_paths','mft_agents','gaps']) reordered[name].reverse();
+for (const route of reordered.routes) route.pnc.corroboration.reverse();
+const reorderedBundle = normalizeProjection(reordered);
+assert(reorderedBundle.run.run_id === first.run.run_id, 'run_id changed only because set-like arrays were reordered');
+assert(JSON.stringify(reorderedBundle) === JSON.stringify(first), 'bundle bytes changed only because set-like arrays were reordered');
+
+const nestedOnlyReordered = clone(fixture);
+nestedOnlyReordered.routes[0].pnc.corroboration.reverse();
+const nestedOnlyBundle = normalizeProjection(nestedOnlyReordered);
+assert(nestedOnlyBundle.run.run_id === first.run.run_id, 'run_id changed because nested PNC corroboration order changed');
+assert(JSON.stringify(nestedOnlyBundle) === JSON.stringify(first), 'bundle bytes changed because nested PNC corroboration order changed');
+
+const overlongGapReason = clone(fixture);
+overlongGapReason.gaps.find(x=>x.site_key==='site-external-ftps').reason = 'x'.repeat(501);
+assert(rejectedWith(overlongGapReason, /reason must not exceed 500 characters/), 'overlong unresolved reason passed normalization');
+
+const sharedGatewayEndpoint = clone(fixture);
+const sharedRouteA = sharedGatewayEndpoint.routes[0];
+const sharedRouteB = sharedGatewayEndpoint.routes[1];
+sharedRouteB.gateway_server_key = sharedRouteA.gateway_server_key;
+sharedRouteB.listener.host = sharedRouteA.listener.host;
+sharedRouteB.listener.port = sharedRouteA.listener.port;
+sharedRouteB.pnc.host = sharedRouteA.pnc.host;
+sharedRouteB.pnc.port = sharedRouteA.pnc.port;
+for (const source of sharedRouteB.pnc.corroboration) {
+  source.endpoint_host = sharedRouteA.pnc.host;
+  source.endpoint_port = sharedRouteA.pnc.port;
+}
+const sharedGatewayBundle = normalizeProjection(sharedGatewayEndpoint);
+const sharedGatewayReordered = clone(sharedGatewayEndpoint);
+sharedGatewayReordered.routes.reverse();
+const sharedGatewayReorderedBundle = normalizeProjection(sharedGatewayReordered);
+assert(sharedGatewayReorderedBundle.run.run_id === sharedGatewayBundle.run.run_id, 'shared gateway endpoint run_id changed only because route input order changed');
+assert(JSON.stringify(sharedGatewayReorderedBundle) === JSON.stringify(sharedGatewayBundle), 'shared gateway endpoint provenance changed only because route input order changed');
+
+const sharedMftQm = clone(fixture);
+sharedMftQm.mft_agents[0].evidence_ref = 'ev:mft-shared';
+sharedMftQm.mft_agents[1].evidence_ref = 'ev:mft-shared';
+sharedMftQm.mft_agents[0].agent_queue_manager = 'QM_SHARED';
+sharedMftQm.mft_agents[1].coordination_queue_manager = 'QM_SHARED';
+const sharedMftBundle = normalizeProjection(sharedMftQm);
+const sharedMftReordered = clone(sharedMftQm);
+sharedMftReordered.mft_agents.reverse();
+const sharedMftReorderedBundle = normalizeProjection(sharedMftReordered);
+assert(sharedMftReorderedBundle.run.run_id === sharedMftBundle.run.run_id, 'shared MFT QM run_id changed only because agent input order changed');
+assert(JSON.stringify(sharedMftReorderedBundle) === JSON.stringify(sharedMftBundle), 'shared MFT QM anchor provenance changed only because agent input order changed');
+
+const sameQm = clone(fixture);
+sameQm.mft_agents[0].coordination_queue_manager = sameQm.mft_agents[0].agent_queue_manager;
+const sameQmBundle = normalizeProjection(sameQm);
+const sameQmEntities = new Map(sameQmBundle.entities.map(x=>[x.ref,x]));
+const prodAgent = sameQmBundle.entities.find(x=>x.semantic_type==='app.application_instance' && x.display_name==='MFTPROD.AGENT01');
+const sameQmDeps = sameQmBundle.relations.filter(x=>x.semantic_type==='network.connects_to' && x.source_ref===prodAgent.ref && sameQmEntities.get(x.target_ref)?.semantic_type==='mq.queue_manager');
+assert(sameQmDeps.length === 2, 'same-QM MFT agent lost one dependency role');
+assert(new Set(sameQmDeps.map(x=>x.ref)).size === 2, 'same-QM MFT dependency relations share an identity');
+assert(new Set(sameQmDeps.map(x=>x.properties?.dependency_role)).size === 2, 'same-QM MFT dependency roles were collapsed');
+
+console.log(JSON.stringify({
+  status: 'PASS',
+  run_id: first.run.run_id,
+  entities: first.entities.length,
+  relations: first.relations.length,
+  unresolved: first.unresolved_references.length,
+  qualified_inbound_paths: qualified.length,
+  route_epistemic: 'inferred',
+  unresolved_sites: 2,
+  pnc_endpoints: pncEndpoints.length,
+  mft_agents: mftAgents.length,
+}, null, 2));
