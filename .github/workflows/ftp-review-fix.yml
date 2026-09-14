@@ -42,4 +42,4 @@ jobs:
           git commit -m "Phase FTP: harden review provenance boundaries"
           git push origin HEAD:ftp-evidence-integration
 
-# retry after aligning patch substitutions with current branch
+# retry after Site-resolution guard correction
