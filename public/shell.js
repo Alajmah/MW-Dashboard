@@ -128,6 +128,7 @@ document.querySelectorAll("[data-go]").forEach((button) => {
 });
 document.getElementById("jumpInventory")?.addEventListener("click", () => navigate("inventory"));
 
+// Route-picker acceptance invariant: Focus alone never reopens cached results.
 // This document-level listener runs after any later direct listeners installed by
 // the legacy module, so canonical screens remain authoritative even after a legacy
 // module has been loaded during the same browser session.
