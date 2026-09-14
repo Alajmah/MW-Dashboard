@@ -5,15 +5,23 @@ import { pathToFileURL } from 'node:url';
 
 const INPUT_SCHEMA = 'osi.ftp.projection/v1';
 const OUTPUT_SCHEMA = 'osi.observation.bundle/v2';
-const ADAPTER_VERSION = '0.1.0';
+const ADAPTER_VERSION = '0.2.0';
 const NORMALIZER_VERSION = '3.1.0';
+const IMPORT_COVERAGE_MODES = new Set(['complete', 'point_in_time', 'partial', 'failed', 'not_collected']);
 const FORBIDDEN_INPUT_KEY = /(password|passwd|secret|token|credential|private[_-]?key|certificate[_-]?content|service[_-]?account|command[_-]?line)/i;
 
 function fail(message) { throw new Error(message); }
 function sha256(value) { return createHash('sha256').update(value).digest('hex'); }
 function stableRef(prefix, ...parts) { return `${prefix}_${sha256(parts.join('|')).slice(0, 20)}`; }
-function uniq(values) { return [...new Set(values.filter(Boolean))]; }
 function cleanObject(value) { return Object.fromEntries(Object.entries(value ?? {}).filter(([, v]) => v !== null && v !== undefined && v !== '')); }
+
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalize(value[key])]));
+}
+function stableStringify(value) { return JSON.stringify(canonicalize(value)); }
+function sortByKey(items) { return [...items].sort((a, b) => String(a?.key ?? '').localeCompare(String(b?.key ?? ''))); }
 
 function assertSafeInput(value, path='root') {
   if (Array.isArray(value)) {
@@ -35,7 +43,7 @@ class Builder {
   }
   entity(semanticType, hints, displayName, observedAt, evidenceClass, { evidenceRef=null, status=null, properties={} }={}) {
     const cleanHints = cleanObject(hints);
-    const key = JSON.stringify([semanticType, cleanHints, evidenceClass, evidenceRef]);
+    const key = stableStringify([semanticType, cleanHints, evidenceClass, evidenceRef]);
     if (this.entityByKey.has(key)) return this.entityByKey.get(key);
     const ref = stableRef('ent', key);
     const item = {
@@ -70,7 +78,21 @@ class Builder {
     this.bundle.relations.push(item);
     return ref;
   }
+  unresolved(sourceRef, semanticType, state, evidenceClass, properties={}) {
+    if (!this.entityType.has(sourceRef)) fail(`unresolved source endpoint missing: ${semanticType}`);
+    const ref = stableRef('unr', sourceRef, semanticType, state, stableStringify(properties));
+    this.bundle.unresolved_references.push({
+      ref,
+      source_ref: sourceRef,
+      semantic_type: semanticType,
+      state,
+      evidence_class: evidenceClass,
+      properties,
+    });
+    return ref;
+  }
   coverage(objectClass, mode, properties={}, evidenceRef=null) {
+    if (!IMPORT_COVERAGE_MODES.has(mode)) fail(`unsupported import coverage mode: ${mode}`);
     const item = {
       scope_type: 'projection',
       scope_key: this.bundle.run.source.id,
@@ -85,6 +107,7 @@ class Builder {
     this.bundle.coverage.sort((a,b)=>`${a.object_class}|${a.mode}`.localeCompare(`${b.object_class}|${b.mode}`));
     this.bundle.entities.sort((a,b)=>`${a.semantic_type}|${a.display_name}|${a.ref}`.localeCompare(`${b.semantic_type}|${b.display_name}|${b.ref}`));
     this.bundle.relations.sort((a,b)=>`${a.semantic_type}|${a.source_ref}|${a.target_ref}|${a.ref}`.localeCompare(`${b.semantic_type}|${b.source_ref}|${b.target_ref}|${b.ref}`));
+    this.bundle.unresolved_references.sort((a,b)=>`${a.semantic_type}|${a.source_ref}|${a.ref}`.localeCompare(`${b.semantic_type}|${b.source_ref}|${b.ref}`));
     return this.bundle;
   }
 }
@@ -107,8 +130,15 @@ function requireEvidence(item, label) {
   return item.evidence_ref;
 }
 function requireCurrentObserved(item, label) {
-  if (item.time_scope && item.time_scope !== 'current') fail(`${label} must be current`);
-  if (item.evidence_class && item.evidence_class !== 'observed') fail(`${label} must use observed evidence`);
+  if (item?.time_scope !== 'current') fail(`${label} must set time_scope=current`);
+  if (item?.evidence_class !== 'observed') fail(`${label} must use evidence_class=observed`);
+}
+function requireHistoricalObserved(item, label) {
+  if (item?.time_scope !== 'historical') fail(`${label} must set time_scope=historical`);
+  if (item?.evidence_class !== 'observed') fail(`${label} must use evidence_class=observed`);
+}
+function requirePort(value, label) {
+  if (!Number.isInteger(value) || value < 1 || value > 65535) fail(`${label} must be an integer TCP port 1-65535`);
 }
 
 export function normalizeProjection(input, { sourceId=null, environment=null }={}) {
@@ -131,16 +161,23 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
   const hostByKey = byKey(hosts, 'host');
   const serverByKey = byKey(servers, 'server');
   const siteByKey = byKey(sites, 'site');
+  byKey(routes, 'route');
+  byKey(storagePaths, 'storage path');
+  byKey(mftAgents, 'MFT agent');
 
-  const runFingerprint = JSON.stringify({
+  const runFingerprint = stableStringify({
+    adapterVersion: ADAPTER_VERSION,
+    normalizerVersion: NORMALIZER_VERSION,
     source,
+    environment: env,
     generatedAt,
-    hosts: hosts.map(x=>x.key).sort(),
-    servers: servers.map(x=>x.key).sort(),
-    sites: sites.map(x=>x.key).sort(),
-    routes: routes.map(x=>x.key).sort(),
-    storagePaths: storagePaths.map(x=>x.key).sort(),
-    mftAgents: mftAgents.map(x=>x.key).sort(),
+    hosts: sortByKey(hosts),
+    servers: sortByKey(servers),
+    sites: sortByKey(sites),
+    routes: sortByKey(routes),
+    storagePaths: sortByKey(storagePaths),
+    mftAgents: sortByKey(mftAgents),
+    gaps: sortByKey(gaps),
   });
   const run = {
     run_id: `ftp:${sha256(runFingerprint).slice(0,24)}`,
@@ -151,10 +188,10 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
     completed_at: generatedAt,
     source: { kind: 'osi_ftp_projection', id: source, display_name: 'OSI EFT + DMZ Gateway + MQ MFT projection' },
     metadata: {
-      projection_profile: 'eft-dmz-mft/current-topology-v1',
+      projection_profile: 'eft-dmz-mft/current-topology-v2',
       adapter_version: ADAPTER_VERSION,
       historical_logs_promoted_to_runtime: false,
-      epistemic_policy: 'observed Site access and current runtime connectivity remain distinct from completed file transfer; configured MFT queue-manager associations do not imply runtime transfer success',
+      epistemic_policy: 'current Site/listener/PNC observations may be composed with historical Site-access evidence only as an inferred topology route; completed file transfer remains unproven',
     },
   };
   const b = new Builder(run);
@@ -210,6 +247,7 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
     const evidenceRef = requireEvidence(site, `site ${site.key}`);
     const server = serverByKey.get(site.server_key);
     if (!server) fail(`site ${site.key} references unknown server ${site.server_key}`);
+    if (server.role !== 'eft_backend') fail(`site ${site.key} must reference an EFT backend server`);
     const ref = b.entity('filetransfer.endpoint', {
       server_key: site.server_key,
       name: site.name,
@@ -232,8 +270,10 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
   const networkEndpointRefs = new Map();
   const fileEndpointRefs = new Map();
   function ensureGatewayEndpoint({ serverKey, name, host, port, endpointKind, evidenceRef }) {
+    const server = serverByKey.get(serverKey);
     const serverRef = serverRefs.get(serverKey);
-    if (!serverRef) fail(`gateway endpoint references unknown server ${serverKey}`);
+    if (!server || !serverRef) fail(`gateway endpoint references unknown server ${serverKey}`);
+    if (server.role !== 'dmz_gateway') fail(`gateway endpoint server ${serverKey} must have role=dmz_gateway`);
     const cacheKey = `${serverKey}|${name}|${host}|${port}`;
     if (fileEndpointRefs.has(cacheKey)) return {
       fileRef: fileEndpointRefs.get(cacheKey),
@@ -269,15 +309,25 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
 
   const resolvedSiteKeys = new Set();
   for (const route of routes) {
-    requireCurrentObserved(route, `route ${route.key}`);
-    const evidenceRef = requireEvidence(route, `route ${route.key}`);
     const site = siteByKey.get(route.site_key);
     if (!site) fail(`route ${route.key} references unknown site ${route.site_key}`);
-    if (!serverByKey.has(route.gateway_server_key)) fail(`route ${route.key} references unknown gateway ${route.gateway_server_key}`);
-    if (!route.listener?.host || !Number.isInteger(route.listener?.port)) fail(`route ${route.key} listener host/port is required`);
-    if (!route.pnc?.host || !Number.isInteger(route.pnc?.port)) fail(`route ${route.key} PNC host/port is required`);
+    const gateway = serverByKey.get(route.gateway_server_key);
+    if (!gateway) fail(`route ${route.key} references unknown gateway ${route.gateway_server_key}`);
+    if (gateway.role !== 'dmz_gateway') fail(`route ${route.key} gateway must have role=dmz_gateway`);
+
+    requireCurrentObserved(route.listener, `route ${route.key} listener`);
+    const listenerEvidenceRef = requireEvidence(route.listener, `route ${route.key} listener`);
+    if (!route.listener?.host) fail(`route ${route.key} listener host is required`);
+    requirePort(route.listener?.port, `route ${route.key} listener port`);
+
+    requireHistoricalObserved(route.site_access, `route ${route.key} Site access`);
+    const siteAccessEvidenceRef = requireEvidence(route.site_access, `route ${route.key} Site access`);
+
+    requireCurrentObserved(route.pnc, `route ${route.key} PNC`);
+    const pncEvidenceRef = requireEvidence(route.pnc, `route ${route.key} PNC`);
+    if (!route.pnc?.host) fail(`route ${route.key} PNC host is required`);
+    requirePort(route.pnc?.port, `route ${route.key} PNC port`);
     if (route.pnc.independently_corroborated !== true) fail(`route ${route.key} requires independently corroborated PNC connectivity`);
-    if (!route.pnc.evidence_ref) fail(`route ${route.key} PNC evidence_ref is required`);
 
     const listener = ensureGatewayEndpoint({
       serverKey: route.gateway_server_key,
@@ -285,7 +335,7 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
       host: route.listener.host,
       port: route.listener.port,
       endpointKind: 'client_listener',
-      evidenceRef,
+      evidenceRef: listenerEvidenceRef,
     });
     const pnc = ensureGatewayEndpoint({
       serverKey: route.gateway_server_key,
@@ -293,47 +343,76 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
       host: route.pnc.host,
       port: route.pnc.port,
       endpointKind: 'peer_notification_channel',
-      evidenceRef: route.pnc.evidence_ref,
+      evidenceRef: pncEvidenceRef,
     });
 
+    const evidenceRefs = [
+      listenerEvidenceRef,
+      siteAccessEvidenceRef,
+      pncEvidenceRef,
+      site.evidence_ref,
+    ];
     const flowRef = b.entity('filetransfer.flow', {
       canonical_key: route.key,
       name: route.name,
-    }, route.name, generatedAt, 'observed', {
-      evidenceRef,
-      status: route.status ?? 'active',
+    }, route.name, generatedAt, 'inferred', {
+      evidenceRef: siteAccessEvidenceRef,
+      status: route.status ?? 'qualified',
       properties: {
-        flow_kind: 'eft_inbound_site_route',
+        flow_kind: 'eft_inbound_site_path',
         site_name: site.name,
         gateway_server_key: route.gateway_server_key,
         listener: `${route.listener.host}:${route.listener.port}`,
-        activity_window_start: route.activity_window_start ?? null,
-        activity_window_end: route.activity_window_end ?? null,
-        granted_access_records: Number(route.granted_access_records ?? 0),
-        denied_access_records: Number(route.denied_access_records ?? 0),
+        site_access_time_scope: 'historical',
+        activity_window_start: route.site_access.activity_window_start ?? null,
+        activity_window_end: route.site_access.activity_window_end ?? null,
+        granted_access_records: Number(route.site_access.granted_access_records ?? 0),
+        denied_access_records: Number(route.site_access.denied_access_records ?? 0),
+        evidence_refs: evidenceRefs,
         runtime_transfer_completion: false,
       },
     });
-    b.relation('network.connects_to', flowRef, listener.fileRef, generatedAt, 'observed', {
-      evidenceRef,
-      properties: { role: 'client_ingress', site_name: site.name },
+    b.relation('network.connects_to', flowRef, listener.fileRef, generatedAt, 'inferred', {
+      evidenceRef: siteAccessEvidenceRef,
+      properties: {
+        role: 'client_ingress_topology',
+        site_name: site.name,
+        epistemic: 'inferred',
+        evidence_refs: evidenceRefs,
+      },
     });
-    b.relation('integration.routes_to', flowRef, siteRefs.get(route.site_key), generatedAt, 'observed', {
-      evidenceRef,
+    b.relation('integration.routes_to', flowRef, siteRefs.get(route.site_key), generatedAt, 'inferred', {
+      evidenceRef: siteAccessEvidenceRef,
       properties: {
         qualified_route: true,
-        epistemic: 'observed',
-        route_kind: 'eft_inbound_site_access',
+        epistemic: 'inferred',
+        route_kind: 'eft_inbound_site_path',
         deterministic: true,
-        runtime_transfer_completion: false,
+        site_access_evidence: {
+          time_scope: 'historical',
+          evidence_class: 'observed',
+          evidence_ref: siteAccessEvidenceRef,
+          activity_window_start: route.site_access.activity_window_start ?? null,
+          activity_window_end: route.site_access.activity_window_end ?? null,
+        },
         runtime_corroboration: [{
           kind: 'eft_dmz_pnc',
+          time_scope: 'current',
+          evidence_class: 'observed',
           gateway_server_key: route.gateway_server_key,
           endpoint: `${route.pnc.host}:${route.pnc.port}`,
           independently_corroborated: true,
-          evidence_ref: route.pnc.evidence_ref,
+          evidence_ref: pncEvidenceRef,
         }],
-        semantic_warning: 'Observed Site access and independently corroborated EFT/DMZ connectivity do not prove a completed file transfer.',
+        current_listener_evidence: {
+          time_scope: 'current',
+          evidence_class: 'observed',
+          endpoint: `${route.listener.host}:${route.listener.port}`,
+          evidence_ref: listenerEvidenceRef,
+        },
+        evidence_refs: evidenceRefs,
+        runtime_transfer_completion: false,
+        semantic_warning: 'This is an inferred topology route composed from historical Site-access evidence plus current listener and independently corroborated PNC observations. It is not current Site traversal or completed file transfer proof.',
       },
     });
 
@@ -341,7 +420,7 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
       canonical_key: `${route.key}:pnc`,
       name: `${site.name} PNC bridge`,
     }, `${site.name} PNC bridge`, generatedAt, 'observed', {
-      evidenceRef: route.pnc.evidence_ref,
+      evidenceRef: pncEvidenceRef,
       status: 'connected',
       properties: {
         flow_kind: 'eft_dmz_pnc',
@@ -350,7 +429,7 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
       },
     });
     b.relation('network.connects_to', pncFlow, pnc.networkRef, generatedAt, 'observed', {
-      evidenceRef: route.pnc.evidence_ref,
+      evidenceRef: pncEvidenceRef,
       properties: {
         role: 'peer_notification_channel',
         independently_corroborated: true,
@@ -429,13 +508,41 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
     mftAgentRefs.push(appRef);
   }
 
-  const unresolvedSites = sites.filter(site => !resolvedSiteKeys.has(site.key)).map(site => site.name);
-  b.coverage('filetransfer.server', 'current', { eft_server_count: servers.filter(x=>x.role==='eft_backend').length, dmz_gateway_count: servers.filter(x=>x.role==='dmz_gateway').length });
-  b.coverage('filetransfer.endpoint', 'current', { eft_site_count: sites.length, resolved_site_route_count: resolvedSiteKeys.size, unresolved_site_listener_routes: unresolvedSites });
-  b.coverage('filetransfer.flow', 'current', { qualified_inbound_route_count: routes.length, historical_event_logs_promoted_to_runtime: false });
-  b.coverage('app.application_instance', 'current', { mq_mft_agent_count: mftAgentRefs.length, transfer_completion_proven: false });
-  b.coverage('filetransfer.storage', 'current', { path_count: storagePaths.length, nfs_inference_forbidden: true });
-  if (gaps.length) b.coverage('filetransfer.coverage_gap', 'explicit', { gaps: gaps.map(g=>({ key:g.key, state:g.state ?? 'unknown', reason:g.reason })) });
+  const unresolvedSites = sites.filter(site => !resolvedSiteKeys.has(site.key));
+  for (const site of unresolvedSites) {
+    const siteRef = siteRefs.get(site.key);
+    b.unresolved(siteRef, 'filetransfer.endpoint', 'unresolved', 'observed', {
+      unresolved_kind: 'site_listener_mapping',
+      site_name: site.name,
+      reason: gaps.find(g => g.site_key === site.key)?.reason ?? 'No current listener/gateway mapping is supported by the supplied evidence.',
+    });
+  }
+
+  b.coverage('filetransfer.server', 'point_in_time', {
+    eft_server_count: servers.filter(x=>x.role==='eft_backend').length,
+    dmz_gateway_count: servers.filter(x=>x.role==='dmz_gateway').length,
+  });
+  b.coverage('filetransfer.endpoint', unresolvedSites.length ? 'partial' : 'point_in_time', {
+    eft_site_count: sites.length,
+    qualified_site_path_count: resolvedSiteKeys.size,
+    unresolved_site_listener_routes: unresolvedSites.map(site=>site.name),
+  });
+  b.coverage('filetransfer.flow', 'partial', {
+    qualified_inbound_path_count: routes.length,
+    route_epistemic: 'inferred',
+    historical_event_logs_promoted_to_runtime: false,
+  });
+  b.coverage('app.application_instance', 'point_in_time', {
+    mq_mft_agent_count: mftAgentRefs.length,
+    transfer_completion_proven: false,
+  });
+  b.coverage('filetransfer.storage', 'point_in_time', {
+    path_count: storagePaths.length,
+    nfs_inference_forbidden: true,
+  });
+  if (gaps.length) b.coverage('filetransfer.coverage_gap', 'partial', {
+    gaps: gaps.map(g=>({ key:g.key, state:g.state ?? 'unknown', reason:g.reason })),
+  });
 
   const bundle = b.finish();
   validateBundle(bundle);
@@ -445,6 +552,7 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
 export function validateBundle(bundle) {
   const supportedTypes = new Set(['infra.host','infra.network_endpoint','filetransfer.server','filetransfer.endpoint','filetransfer.flow','app.application_instance','mq.queue_manager']);
   const evidenceClasses = new Set(['observed','configured','declared','inferred']);
+  const unresolvedStates = new Set(['unresolved','ambiguous','dynamic','stale','conflicted','resolved']);
   const relationRules = new Map([
     ['runs_on', [new Set(['filetransfer.server','app.application_instance']), new Set(['infra.host'])]],
     ['network.listens_on', [new Set(['filetransfer.endpoint']), new Set(['infra.network_endpoint'])]],
@@ -454,6 +562,9 @@ export function validateBundle(bundle) {
   ]);
   const refs = new Map(bundle.entities.map(entity=>[entity.ref,entity]));
   if (refs.size !== bundle.entities.length) fail('duplicate entity refs');
+  for (const coverage of bundle.coverage) {
+    if (!IMPORT_COVERAGE_MODES.has(coverage.mode)) fail(`unsupported coverage mode ${coverage.mode}`);
+  }
   for (const entity of bundle.entities) {
     if (!supportedTypes.has(entity.semantic_type)) fail(`unsupported entity type ${entity.semantic_type}`);
     if (!evidenceClasses.has(entity.evidence_class)) fail(`unsupported entity evidence class ${entity.evidence_class}`);
@@ -469,12 +580,26 @@ export function validateBundle(bundle) {
       fail(`illegal relation ${relation.semantic_type}: ${source.semantic_type} -> ${target.semantic_type}`);
     }
     if (relation.semantic_type === 'integration.routes_to') {
-      if (relation.evidence_class !== 'observed') fail('FTP qualified route must remain observed evidence');
+      if (relation.evidence_class !== 'inferred') fail('FTP qualified topology route must remain inferred evidence');
       if (relation.properties?.qualified_route !== true) fail('FTP route must set qualified_route=true');
-      if (relation.properties?.epistemic !== 'observed') fail('FTP route epistemic must be observed');
-      if (relation.properties?.runtime_transfer_completion !== false) fail('FTP Site access must not be promoted to transfer completion');
+      if (relation.properties?.epistemic !== 'inferred') fail('FTP route epistemic must be inferred');
+      if (relation.properties?.runtime_transfer_completion !== false) fail('FTP Site path must not be promoted to transfer completion');
+      if (relation.properties?.site_access_evidence?.time_scope !== 'historical') fail('FTP route must preserve historical Site-access time scope');
+      if (relation.properties?.site_access_evidence?.evidence_class !== 'observed') fail('FTP Site-access component must remain observed evidence');
       if (!Array.isArray(relation.properties?.runtime_corroboration) || relation.properties.runtime_corroboration.length !== 1) fail('FTP route requires one PNC runtime corroboration record');
+      const corroboration = relation.properties.runtime_corroboration[0];
+      if (corroboration?.time_scope !== 'current' || corroboration?.evidence_class !== 'observed' || corroboration?.independently_corroborated !== true) {
+        fail('FTP PNC corroboration must remain current observed independently corroborated evidence');
+      }
+      if (relation.properties?.current_listener_evidence?.time_scope !== 'current' || relation.properties?.current_listener_evidence?.evidence_class !== 'observed') {
+        fail('FTP listener component must remain current observed evidence');
+      }
     }
+  }
+  for (const unresolved of bundle.unresolved_references) {
+    if (!refs.has(unresolved.source_ref)) fail(`unresolved source missing ${unresolved.ref}`);
+    if (!unresolvedStates.has(unresolved.state)) fail(`unsupported unresolved state ${unresolved.state}`);
+    if (unresolved.evidence_class && !evidenceClasses.has(unresolved.evidence_class)) fail(`unsupported unresolved evidence class ${unresolved.evidence_class}`);
   }
   const serialized = JSON.stringify(bundle).toLowerCase();
   for (const token of ['password','passwd','mftcredentials.xml','command_line":"','service_account']) {
@@ -501,7 +626,14 @@ async function main() {
   const input=JSON.parse(await readFile(args.input,'utf8'));
   const bundle=normalizeProjection(input,{sourceId:args['source-id']??null,environment:args.environment??null});
   await writeFile(args.output,JSON.stringify(bundle,null,2)+'\n','utf8');
-  console.log(JSON.stringify({ output: args.output, run_id: bundle.run.run_id, entities: bundle.entities.length, relations: bundle.relations.length, coverage: bundle.coverage.length },null,2));
+  console.log(JSON.stringify({
+    output: args.output,
+    run_id: bundle.run.run_id,
+    entities: bundle.entities.length,
+    relations: bundle.relations.length,
+    unresolved: bundle.unresolved_references.length,
+    coverage: bundle.coverage.length,
+  },null,2));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
