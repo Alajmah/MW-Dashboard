@@ -82,7 +82,15 @@ A local NTFS path is not promoted to an NFS dependency unless an independent sou
 
 The source `run_id` fingerprints the complete normalized input contract, environment, adapter version, and normalizer version—not only object keys. A semantic correction with the same object keys therefore produces a different run ID, while harmless reordering of top-level keyed arrays does not.
 
+Nested PNC corroboration is also canonicalized before fingerprinting because corroboration records are set-like evidence components. Reordering those records therefore cannot create a different run ID or bundle solely because of collector ordering.
+
 This avoids the recovery problem where changed evidence could collide with a previously imported deterministic run ID.
+
+## Review hardening
+
+The production boundary is fail-closed: a stopped Site cannot qualify a route; an unresolved Site-to-listener mapping cannot qualify a route; PNC qualification requires provenance-bearing current observations from at least two distinct runtime source kinds; and each unresolved Site reference carries its reason in the top-level semantic-import contract field as well as operator-facing properties.
+
+These rules prevent current-state, independence, determinism, or unresolved-reason semantics from being reconstructed later by assumption.
 
 ## Sensitive-data boundary
 
