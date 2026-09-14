@@ -87,8 +87,17 @@
       "server_key": "eft:EFT01",
       "status": "started",
       "listener_resolution": "qualified-inferred",
-      "runtime_sample": { "sessions_min": 3, "sessions_max": 4, "uploads_min": 0, "uploads_max": 1, "downloads_min": 0, "downloads_max": 0 },
-      "historical_context": { "event_rule_activity_seen": true },
+      "runtime_sample": {
+        "sessions_min": 3,
+        "sessions_max": 4,
+        "uploads_min": 0,
+        "uploads_max": 1,
+        "downloads_min": 0,
+        "downloads_max": 0
+      },
+      "historical_context": {
+        "event_rule_activity_seen": true
+      },
       "time_scope": "current",
       "evidence_class": "observed",
       "evidence_ref": "ev:site-external-user"
@@ -99,8 +108,13 @@
       "server_key": "eft:EFT01",
       "status": "started",
       "listener_resolution": "qualified-inferred",
-      "runtime_sample": { "sessions_min": 0, "sessions_max": 0 },
-      "historical_context": { "event_rule_activity_seen": true },
+      "runtime_sample": {
+        "sessions_min": 0,
+        "sessions_max": 0
+      },
+      "historical_context": {
+        "event_rule_activity_seen": true
+      },
       "time_scope": "current",
       "evidence_class": "observed",
       "evidence_ref": "ev:site-external-public"
@@ -111,8 +125,17 @@
       "server_key": "eft:EFT01",
       "status": "started",
       "listener_resolution": "qualified-inferred",
-      "runtime_sample": { "sessions_min": 1, "sessions_max": 1, "uploads_min": 1, "uploads_max": 2, "downloads_min": 0, "downloads_max": 1 },
-      "historical_context": { "event_rule_activity_seen": true },
+      "runtime_sample": {
+        "sessions_min": 1,
+        "sessions_max": 1,
+        "uploads_min": 1,
+        "uploads_max": 2,
+        "downloads_min": 0,
+        "downloads_max": 1
+      },
+      "historical_context": {
+        "event_rule_activity_seen": true
+      },
       "time_scope": "current",
       "evidence_class": "observed",
       "evidence_ref": "ev:site-public-internet"
@@ -123,8 +146,14 @@
       "server_key": "eft:EFT01",
       "status": "started",
       "listener_resolution": "unresolved",
-      "runtime_sample": { "sessions_min": 0, "sessions_max": 0 },
-      "historical_context": { "event_rule_activity_seen": true, "copy_action_seen": true },
+      "runtime_sample": {
+        "sessions_min": 0,
+        "sessions_max": 0
+      },
+      "historical_context": {
+        "event_rule_activity_seen": true,
+        "copy_action_seen": true
+      },
       "time_scope": "current",
       "evidence_class": "observed",
       "evidence_ref": "ev:site-external-ftps"
@@ -135,8 +164,13 @@
       "server_key": "eft:EFT01",
       "status": "started",
       "listener_resolution": "unresolved",
-      "runtime_sample": { "sessions_min": 0, "sessions_max": 0 },
-      "historical_context": { "auth_sync_seen": true },
+      "runtime_sample": {
+        "sessions_min": 0,
+        "sessions_max": 0
+      },
+      "historical_context": {
+        "auth_sync_seen": true
+      },
       "time_scope": "current",
       "evidence_class": "observed",
       "evidence_ref": "ev:site-internal-user"
@@ -171,7 +205,26 @@
         "evidence_class": "observed",
         "independently_corroborated": true,
         "evidence_ref": "ev:pnc-a1-dmz",
-        "corroboration_evidence_refs": ["ev:pnc-a1-dmz", "ev:pnc-a1-eft"]
+        "corroboration": [
+          {
+            "kind": "pnc_runtime_connectivity",
+            "source_kind": "dmz_gateway_runtime",
+            "time_scope": "current",
+            "evidence_class": "observed",
+            "evidence_ref": "ev:pnc-a1-dmz",
+            "endpoint_host": "192.0.2.20",
+            "endpoint_port": 44500
+          },
+          {
+            "kind": "pnc_runtime_connectivity",
+            "source_kind": "eft_runtime",
+            "time_scope": "current",
+            "evidence_class": "observed",
+            "evidence_ref": "ev:pnc-a1-eft",
+            "endpoint_host": "192.0.2.20",
+            "endpoint_port": 44500
+          }
+        ]
       },
       "status": "qualified"
     },
@@ -203,7 +256,26 @@
         "evidence_class": "observed",
         "independently_corroborated": true,
         "evidence_ref": "ev:pnc-a2-dmz",
-        "corroboration_evidence_refs": ["ev:pnc-a2-dmz", "ev:pnc-a2-eft"]
+        "corroboration": [
+          {
+            "kind": "pnc_runtime_connectivity",
+            "source_kind": "dmz_gateway_runtime",
+            "time_scope": "current",
+            "evidence_class": "observed",
+            "evidence_ref": "ev:pnc-a2-dmz",
+            "endpoint_host": "192.0.2.21",
+            "endpoint_port": 44501
+          },
+          {
+            "kind": "pnc_runtime_connectivity",
+            "source_kind": "eft_runtime",
+            "time_scope": "current",
+            "evidence_class": "observed",
+            "evidence_ref": "ev:pnc-a2-eft",
+            "endpoint_host": "192.0.2.21",
+            "endpoint_port": 44501
+          }
+        ]
       },
       "status": "qualified"
     },
@@ -235,7 +307,26 @@
         "evidence_class": "observed",
         "independently_corroborated": true,
         "evidence_ref": "ev:pnc-b1-dmz",
-        "corroboration_evidence_refs": ["ev:pnc-b1-dmz", "ev:pnc-b1-eft"]
+        "corroboration": [
+          {
+            "kind": "pnc_runtime_connectivity",
+            "source_kind": "dmz_gateway_runtime",
+            "time_scope": "current",
+            "evidence_class": "observed",
+            "evidence_ref": "ev:pnc-b1-dmz",
+            "endpoint_host": "192.0.2.30",
+            "endpoint_port": 44502
+          },
+          {
+            "kind": "pnc_runtime_connectivity",
+            "source_kind": "eft_runtime",
+            "time_scope": "current",
+            "evidence_class": "observed",
+            "evidence_ref": "ev:pnc-b1-eft",
+            "endpoint_host": "192.0.2.30",
+            "endpoint_port": 44502
+          }
+        ]
       },
       "status": "qualified"
     }

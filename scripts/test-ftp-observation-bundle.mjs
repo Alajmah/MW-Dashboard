@@ -24,7 +24,7 @@ assert(validateBundle(first) === true, 'bundle validation failed');
 assert(JSON.stringify(first) === JSON.stringify(second), 'normalization is not deterministic');
 assert(first.schema_version === 'osi.observation.bundle/v2', 'wrong output schema');
 assert(first.run.normalizer_version === '3.1.0', 'wrong normalizer version');
-assert(first.run.collector_version === '0.2.0', 'wrong adapter version');
+assert(first.run.collector_version === '0.3.0', 'wrong adapter version');
 assert(first.run.metadata?.historical_logs_promoted_to_runtime === false, 'historical evidence promotion guard missing');
 
 const entities = first.entities;
@@ -36,6 +36,8 @@ assert(relations.length === 30, `expected 30 relations, got ${relations.length}`
 assert(new Set(relations.map(x=>x.ref)).size === relations.length, 'duplicate relation refs exist');
 assert(first.unresolved_references.length === 2, `expected 2 unresolved references, got ${first.unresolved_references.length}`);
 assert(first.unresolved_references.every(x=>x.state==='unresolved' && x.properties?.unresolved_kind==='site_listener_mapping'), 'unresolved Site mappings are malformed');
+assert(first.unresolved_references.every(x=>typeof x.reason==='string' && x.reason.length>0), 'unresolved reasons are not emitted in the import-contract field');
+assert(first.unresolved_references.some(x=>x.reason.includes('historical activity')), 'gap-specific unresolved reason was lost');
 
 const importCoverageModes = new Set(['complete','point_in_time','partial','failed','not_collected']);
 assert(first.coverage.every(x=>importCoverageModes.has(x.mode)), 'bundle contains a coverage mode rejected by semantic-import');
@@ -61,8 +63,12 @@ for (const route of qualified) {
   assert(pnc.time_scope === 'current', 'PNC corroboration time scope is not current');
   assert(pnc.evidence_class === 'observed', 'PNC corroboration is not observed');
   assert(pnc.independently_corroborated === true, 'PNC corroboration is not independently supported');
-  assert(Array.isArray(pnc.evidence_refs) && new Set(pnc.evidence_refs).size >= 2, 'PNC corroboration lacks two independent evidence refs');
-  assert(!pnc.evidence_refs.includes(route.properties.site_access_evidence.evidence_ref), 'PNC evidence reuses the historical Site-access evidence');
+  assert(Array.isArray(pnc.sources) && pnc.sources.length >= 2, 'PNC provenance-bearing sources missing');
+  assert(new Set(pnc.sources.map(x=>x.source_kind)).size >= 2, 'PNC sources are not independent by source kind');
+  assert(new Set(pnc.sources.map(x=>x.evidence_ref)).size >= 2, 'PNC sources are not independent by evidence ref');
+  assert(pnc.sources.every(x=>x.kind==='pnc_runtime_connectivity'), 'non-PNC evidence was admitted as PNC corroboration');
+  assert(pnc.sources.every(x=>x.time_scope==='current' && x.evidence_class==='observed'), 'PNC source provenance was flattened');
+  assert(!pnc.sources.some(x=>x.evidence_ref===route.properties.site_access_evidence.evidence_ref), 'PNC evidence reuses the historical Site-access evidence');
   assert(route.properties?.semantic_warning, 'semantic warning missing');
   assert(byRef.get(route.source_ref)?.semantic_type === 'filetransfer.flow', 'qualified route source is not filetransfer.flow');
   assert(byRef.get(route.target_ref)?.semantic_type === 'filetransfer.endpoint', 'qualified route target is not filetransfer.endpoint');
@@ -113,21 +119,34 @@ const missingEvidenceClass = clone(fixture);
 delete missingEvidenceClass.sites[0].evidence_class;
 assert(rejectedWith(missingEvidenceClass, /must use evidence_class=observed/), 'missing observed evidence class was silently promoted');
 
+const stoppedSite = clone(fixture);
+stoppedSite.sites.find(x=>x.key==='site-external-user').status = 'stopped';
+assert(rejectedWith(stoppedSite, /unless status=started/), 'stopped Site was exposed as a qualified route');
+
 const badPnc = clone(fixture);
 badPnc.routes[0].pnc.independently_corroborated = false;
 assert(rejectedWith(badPnc, /independently corroborated PNC/), 'uncorroborated PNC route was accepted');
 
 const onePncSource = clone(fixture);
-onePncSource.routes[0].pnc.corroboration_evidence_refs = ['ev:pnc-a1-dmz'];
-assert(rejectedWith(onePncSource, /at least two distinct corroboration_evidence_refs/), 'single-source PNC evidence was accepted as independent corroboration');
+onePncSource.routes[0].pnc.corroboration = [onePncSource.routes[0].pnc.corroboration[0]];
+assert(rejectedWith(onePncSource, /at least two provenance-bearing corroboration records/), 'single-source PNC evidence was accepted as independent corroboration');
+
+const duplicatePncSourceKind = clone(fixture);
+duplicatePncSourceKind.routes[0].pnc.corroboration[1].source_kind = duplicatePncSourceKind.routes[0].pnc.corroboration[0].source_kind;
+assert(rejectedWith(duplicatePncSourceKind, /at least two distinct runtime source kinds/), 'same-kind evidence was accepted as independent PNC corroboration');
+
+const listenerMasqueradingAsPnc = clone(fixture);
+listenerMasqueradingAsPnc.routes[0].pnc.corroboration[1].kind = 'listener_runtime_state';
+listenerMasqueradingAsPnc.routes[0].pnc.corroboration[1].evidence_ref = listenerMasqueradingAsPnc.routes[0].listener.evidence_ref;
+assert(rejectedWith(listenerMasqueradingAsPnc, /kind must be pnc_runtime_connectivity/), 'listener evidence was accepted as PNC corroboration');
 
 const reusedSiteAccess = clone(fixture);
-reusedSiteAccess.routes[0].pnc.corroboration_evidence_refs = ['ev:pnc-a1-dmz', 'ev:site-access-external-user'];
+reusedSiteAccess.routes[0].pnc.corroboration[1].evidence_ref = reusedSiteAccess.routes[0].site_access.evidence_ref;
 assert(rejectedWith(reusedSiteAccess, /independent of Site-access evidence/), 'PNC corroboration reused Site-access evidence');
 
 const historicalPnc = clone(fixture);
-historicalPnc.routes[0].pnc.time_scope = 'historical';
-assert(rejectedWith(historicalPnc, /PNC must set time_scope=current/), 'historical PNC evidence was promoted to current runtime corroboration');
+historicalPnc.routes[0].pnc.corroboration[1].time_scope = 'historical';
+assert(rejectedWith(historicalPnc, /must set time_scope=current/), 'historical PNC evidence was promoted to current runtime corroboration');
 
 const currentSiteAccess = clone(fixture);
 currentSiteAccess.routes[0].site_access.time_scope = 'current';
@@ -144,9 +163,16 @@ assert(mutatedBundle.run.run_id !== first.run.run_id, 'run_id did not change whe
 
 const reordered = clone(fixture);
 for (const name of ['hosts','servers','sites','routes','storage_paths','mft_agents','gaps']) reordered[name].reverse();
+for (const route of reordered.routes) route.pnc.corroboration.reverse();
 const reorderedBundle = normalizeProjection(reordered);
-assert(reorderedBundle.run.run_id === first.run.run_id, 'run_id changed only because top-level keyed arrays were reordered');
-assert(JSON.stringify(reorderedBundle) === JSON.stringify(first), 'bundle bytes changed only because top-level keyed arrays were reordered');
+assert(reorderedBundle.run.run_id === first.run.run_id, 'run_id changed only because set-like arrays were reordered');
+assert(JSON.stringify(reorderedBundle) === JSON.stringify(first), 'bundle bytes changed only because set-like arrays were reordered');
+
+const nestedOnlyReordered = clone(fixture);
+nestedOnlyReordered.routes[0].pnc.corroboration.reverse();
+const nestedOnlyBundle = normalizeProjection(nestedOnlyReordered);
+assert(nestedOnlyBundle.run.run_id === first.run.run_id, 'run_id changed because nested PNC corroboration order changed');
+assert(JSON.stringify(nestedOnlyBundle) === JSON.stringify(first), 'bundle bytes changed because nested PNC corroboration order changed');
 
 const sameQm = clone(fixture);
 sameQm.mft_agents[0].coordination_queue_manager = sameQm.mft_agents[0].agent_queue_manager;

@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 
 const INPUT_SCHEMA = 'osi.ftp.projection/v1';
 const OUTPUT_SCHEMA = 'osi.observation.bundle/v2';
-const ADAPTER_VERSION = '0.2.0';
+const ADAPTER_VERSION = '0.3.0';
 const NORMALIZER_VERSION = '3.1.0';
 const IMPORT_COVERAGE_MODES = new Set(['complete', 'point_in_time', 'partial', 'failed', 'not_collected']);
 const FORBIDDEN_INPUT_KEY = /(password|passwd|secret|token|credential|private[_-]?key|certificate[_-]?content|service[_-]?account|command[_-]?line)/i;
@@ -23,6 +23,14 @@ function canonicalize(value) {
 }
 function stableStringify(value) { return JSON.stringify(canonicalize(value)); }
 function sortByKey(items) { return [...items].sort((a, b) => String(a?.key ?? '').localeCompare(String(b?.key ?? ''))); }
+function sortStable(items) { return [...items].map(canonicalize).sort((a, b) => stableStringify(a).localeCompare(stableStringify(b))); }
+function canonicalRoutesForFingerprint(routes) {
+  return sortByKey(routes).map(route => {
+    const copy = structuredClone(route);
+    if (copy?.pnc && Array.isArray(copy.pnc.corroboration)) copy.pnc.corroboration = sortStable(copy.pnc.corroboration);
+    return copy;
+  });
+}
 
 function assertSafeInput(value, path='root') {
   if (Array.isArray(value)) {
@@ -81,16 +89,19 @@ class Builder {
     this.bundle.relations.push(item);
     return ref;
   }
-  unresolved(sourceRef, semanticType, state, evidenceClass, properties={}) {
+  unresolved(sourceRef, semanticType, state, evidenceClass, reason, properties={}) {
     if (!this.entityType.has(sourceRef)) fail(`unresolved source endpoint missing: ${semanticType}`);
+    if (typeof reason !== 'string' || !reason.trim()) fail(`unresolved ${semanticType} reason is required`);
+    const normalizedReason = reason.trim();
     const normalizedProperties = canonicalize(properties);
-    const ref = stableRef('unr', sourceRef, semanticType, state, stableStringify(normalizedProperties));
+    const ref = stableRef('unr', sourceRef, semanticType, state, normalizedReason, stableStringify(normalizedProperties));
     this.bundle.unresolved_references.push({
       ref,
       source_ref: sourceRef,
       semantic_type: semanticType,
       state,
       evidence_class: evidenceClass,
+      reason: normalizedReason,
       properties: normalizedProperties,
     });
     return ref;
@@ -178,7 +189,7 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
     hosts: sortByKey(hosts),
     servers: sortByKey(servers),
     sites: sortByKey(sites),
-    routes: sortByKey(routes),
+    routes: canonicalRoutesForFingerprint(routes),
     storagePaths: sortByKey(storagePaths),
     mftAgents: sortByKey(mftAgents),
     gaps: sortByKey(gaps),
@@ -192,10 +203,10 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
     completed_at: generatedAt,
     source: { kind: 'osi_ftp_projection', id: source, display_name: 'OSI EFT + DMZ Gateway + MQ MFT projection' },
     metadata: {
-      projection_profile: 'eft-dmz-mft/current-topology-v2',
+      projection_profile: 'eft-dmz-mft/current-topology-v3',
       adapter_version: ADAPTER_VERSION,
       historical_logs_promoted_to_runtime: false,
-      epistemic_policy: 'current Site/listener/PNC observations may be composed with historical Site-access evidence only as an inferred topology route; completed file transfer remains unproven',
+      epistemic_policy: 'current started-Site/listener observations may be composed with historical Site-access evidence only as an inferred topology route; PNC qualification requires provenance-bearing current runtime corroboration from at least two distinct source kinds; completed file transfer remains unproven',
     },
   };
   const b = new Builder(run);
@@ -315,6 +326,8 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
   for (const route of routes) {
     const site = siteByKey.get(route.site_key);
     if (!site) fail(`route ${route.key} references unknown site ${route.site_key}`);
+    if (site.status !== 'started') fail(`route ${route.key} cannot qualify Site ${site.name} unless status=started`);
+    if (site.listener_resolution === 'unresolved') fail(`route ${route.key} cannot qualify Site ${site.name} while listener_resolution=unresolved`);
     const gateway = serverByKey.get(route.gateway_server_key);
     if (!gateway) fail(`route ${route.key} references unknown gateway ${route.gateway_server_key}`);
     if (gateway.role !== 'dmz_gateway') fail(`route ${route.key} gateway must have role=dmz_gateway`);
@@ -332,10 +345,34 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
     if (!route.pnc?.host) fail(`route ${route.key} PNC host is required`);
     requirePort(route.pnc?.port, `route ${route.key} PNC port`);
     if (route.pnc.independently_corroborated !== true) fail(`route ${route.key} requires independently corroborated PNC connectivity`);
-    const pncCorroborationRefs = uniqStrings(route.pnc.corroboration_evidence_refs);
-    if (pncCorroborationRefs.length < 2) fail(`route ${route.key} PNC requires at least two distinct corroboration_evidence_refs`);
-    if (!pncCorroborationRefs.includes(pncEvidenceRef)) fail(`route ${route.key} PNC evidence_ref must be included in corroboration_evidence_refs`);
-    if (pncCorroborationRefs.includes(siteAccessEvidenceRef)) fail(`route ${route.key} PNC corroboration must be independent of Site-access evidence`);
+    if (!Array.isArray(route.pnc.corroboration) || route.pnc.corroboration.length < 2) {
+      fail(`route ${route.key} PNC requires at least two provenance-bearing corroboration records`);
+    }
+    const pncCorroboration = route.pnc.corroboration.map((item, index) => {
+      const label = `route ${route.key} PNC corroboration[${index}]`;
+      requireCurrentObserved(item, label);
+      const evidenceRef = requireEvidence(item, label);
+      if (item.kind !== 'pnc_runtime_connectivity') fail(`${label} kind must be pnc_runtime_connectivity`);
+      if (typeof item.source_kind !== 'string' || !item.source_kind.trim()) fail(`${label} source_kind is required`);
+      if (item.endpoint_host !== route.pnc.host) fail(`${label} endpoint_host must match route PNC host`);
+      requirePort(item.endpoint_port, `${label} endpoint_port`);
+      if (item.endpoint_port !== route.pnc.port) fail(`${label} endpoint_port must match route PNC port`);
+      if (evidenceRef === siteAccessEvidenceRef) fail(`route ${route.key} PNC corroboration must be independent of Site-access evidence`);
+      return canonicalize({
+        kind: 'pnc_runtime_connectivity',
+        source_kind: item.source_kind.trim(),
+        time_scope: 'current',
+        evidence_class: 'observed',
+        evidence_ref: evidenceRef,
+        endpoint_host: route.pnc.host,
+        endpoint_port: route.pnc.port,
+      });
+    }).sort((a,b)=>stableStringify(a).localeCompare(stableStringify(b)));
+    const pncCorroborationRefs = uniqStrings(pncCorroboration.map(item => item.evidence_ref)).sort();
+    const pncSourceKinds = uniqStrings(pncCorroboration.map(item => item.source_kind)).sort();
+    if (pncCorroborationRefs.length < 2) fail(`route ${route.key} PNC requires at least two distinct runtime evidence refs`);
+    if (pncSourceKinds.length < 2) fail(`route ${route.key} PNC requires at least two distinct runtime source kinds`);
+    if (!pncCorroborationRefs.includes(pncEvidenceRef)) fail(`route ${route.key} PNC evidence_ref must be represented by a corroboration record`);
 
     const listener = ensureGatewayEndpoint({
       serverKey: route.gateway_server_key,
@@ -411,7 +448,8 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
           endpoint: `${route.pnc.host}:${route.pnc.port}`,
           independently_corroborated: true,
           evidence_ref: pncEvidenceRef,
-          evidence_refs: [...pncCorroborationRefs].sort(),
+          evidence_refs: [...pncCorroborationRefs],
+          sources: pncCorroboration,
         }],
         current_listener_evidence: {
           time_scope: 'current',
@@ -434,7 +472,8 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
       properties: {
         flow_kind: 'eft_dmz_pnc',
         target_gateway_server_key: route.gateway_server_key,
-        evidence_refs: [...pncCorroborationRefs].sort(),
+        evidence_refs: [...pncCorroborationRefs],
+        corroboration_sources: pncCorroboration,
         runtime_transfer_completion: false,
       },
     });
@@ -443,7 +482,8 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
       properties: {
         role: 'peer_notification_channel',
         independently_corroborated: true,
-        evidence_refs: [...pncCorroborationRefs].sort(),
+        evidence_refs: [...pncCorroborationRefs],
+        corroboration_sources: pncCorroboration,
         runtime_transfer_completion: false,
       },
     });
@@ -524,10 +564,12 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
     .sort((a,b)=>String(a.key).localeCompare(String(b.key)));
   for (const site of unresolvedSites) {
     const siteRef = siteRefs.get(site.key);
-    b.unresolved(siteRef, 'filetransfer.endpoint', 'unresolved', 'observed', {
+    const reason = gaps.find(g => g.site_key === site.key)?.reason
+      ?? 'No current listener/gateway mapping is supported by the supplied evidence.';
+    b.unresolved(siteRef, 'filetransfer.endpoint', 'unresolved', 'observed', reason, {
       unresolved_kind: 'site_listener_mapping',
       site_name: site.name,
-      reason: gaps.find(g => g.site_key === site.key)?.reason ?? 'No current listener/gateway mapping is supported by the supplied evidence.',
+      reason,
     });
   }
 
@@ -606,9 +648,18 @@ export function validateBundle(bundle) {
       if (corroboration?.time_scope !== 'current' || corroboration?.evidence_class !== 'observed' || corroboration?.independently_corroborated !== true) {
         fail('FTP PNC corroboration must remain current observed independently corroborated evidence');
       }
-      const corroborationRefs = uniqStrings(corroboration?.evidence_refs);
-      if (corroborationRefs.length < 2) fail('FTP PNC corroboration requires at least two distinct evidence refs');
-      if (corroborationRefs.includes(relation.properties?.site_access_evidence?.evidence_ref)) fail('FTP PNC corroboration must remain independent of Site-access evidence');
+      if (!Array.isArray(corroboration.sources) || corroboration.sources.length < 2) fail('FTP route PNC corroboration requires provenance-bearing sources');
+      const sourceKinds = new Set();
+      const pncEvidenceRefs = new Set();
+      for (const source of corroboration.sources) {
+        if (source?.kind !== 'pnc_runtime_connectivity') fail('FTP route PNC source kind is invalid');
+        if (source?.time_scope !== 'current' || source?.evidence_class !== 'observed') fail('FTP route PNC source provenance is invalid');
+        if (!source?.source_kind || !source?.evidence_ref) fail('FTP route PNC source metadata is incomplete');
+        if (source.evidence_ref === relation.properties?.site_access_evidence?.evidence_ref) fail('FTP PNC corroboration must remain independent of Site-access evidence');
+        sourceKinds.add(source.source_kind);
+        pncEvidenceRefs.add(source.evidence_ref);
+      }
+      if (sourceKinds.size < 2 || pncEvidenceRefs.size < 2) fail('FTP route PNC corroboration is not independent');
       if (relation.properties?.current_listener_evidence?.time_scope !== 'current' || relation.properties?.current_listener_evidence?.evidence_class !== 'observed') {
         fail('FTP listener component must remain current observed evidence');
       }
@@ -618,6 +669,7 @@ export function validateBundle(bundle) {
     if (!refs.has(unresolved.source_ref)) fail(`unresolved source missing ${unresolved.ref}`);
     if (!unresolvedStates.has(unresolved.state)) fail(`unsupported unresolved state ${unresolved.state}`);
     if (unresolved.evidence_class && !evidenceClasses.has(unresolved.evidence_class)) fail(`unsupported unresolved evidence class ${unresolved.evidence_class}`);
+    if (typeof unresolved.reason !== 'string' || !unresolved.reason.trim()) fail(`unresolved reason missing ${unresolved.ref}`);
   }
   const serialized = JSON.stringify(bundle).toLowerCase();
   for (const token of ['password','passwd','mftcredentials.xml','command_line":"','service_account']) {

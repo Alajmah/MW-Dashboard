@@ -62,7 +62,7 @@ Historical Event Rule activity is contextual only and cannot resolve those mappi
 
 Client-facing listeners and PNC endpoints are separate canonical objects. A client listener must never be reused as the PNC endpoint merely because both belong to the same DMZ Gateway.
 
-The normalizer fails closed unless listener evidence is current+observed and PNC evidence is current+observed+independently corroborated.
+The normalizer fails closed unless PNC corroboration contains at least two current observed `pnc_runtime_connectivity` records with distinct `source_kind` values and evidence references for the same PNC endpoint. Opaque evidence-ref counts alone are insufficient.
 
 ### MQ Managed File Transfer
 
