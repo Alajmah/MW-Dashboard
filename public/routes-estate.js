@@ -20,14 +20,17 @@ function typeLabel(type) {
     "mq.queue": "Queue",
     "ace.message_flow": "ACE message flow",
     "datapower.service": "DataPower service",
+    "filetransfer.server": "File-transfer server",
+    "filetransfer.endpoint": "File-transfer endpoint",
     "filetransfer.flow": "File-transfer flow",
+    "infra.network_endpoint": "Network endpoint",
   };
   return map[type] || String(type || "entity").replaceAll(".", " · ").replaceAll("_", " ");
 }
 
 function ownerLabel(entity) {
   const props = entity?.properties || {};
-  return props.queue_manager || props.qmgr || props.queue_manager_name || "";
+  return props.queue_manager || props.qmgr || props.queue_manager_name || props.server_key || props.gateway_server_key || props.physical_host || "";
 }
 
 function entityQualifier(entity) {
@@ -91,7 +94,7 @@ function setSelection(side, entity, { quiet = false, preserveResult = false } = 
     input.value = entity.display_name || entity.identity_key || entity.entity_id;
     context.textContent = entityQualifier(entity);
   } else if (!quiet) {
-    context.textContent = side === "from" ? "Choose a source application, process or queue" : "Choose a destination application, process or queue";
+    context.textContent = side === "from" ? "Choose a source application, flow, process, queue or transfer path" : "Choose a destination application, queue or transfer endpoint";
   }
   if (!preserveResult) invalidateRouteResult();
 }
@@ -203,7 +206,6 @@ function bindPicker(side) {
     routeState.timers[side] = setTimeout(() => searchEntities(side, input.value), 180);
   });
   input.addEventListener("focus", () => {
-    // Focus alone never reopens cached results. A new query must be typed.
     if (routeState[side]) results.classList.remove("open");
   });
 }
@@ -213,7 +215,9 @@ function evidenceBadges(values) {
   return items.map((value) => `<span class="evidence-badge ${resc(value)}">${resc(value)}</span>`).join("") || `<span class="evidence-badge">unknown</span>`;
 }
 
-function modeCard(mode) {
+function modeCard(mode, semantics = {}) {
+  if (semantics.qualified_route && semantics.route_domain === "file_transfer") return ["Qualified topology route", "Historical Site access plus current listener and PNC evidence qualify topology; transfer outcome remains separate.", "info"];
+  if (semantics.qualified_route) return ["Qualified integration route", "Configured/static route evidence is qualified independently from runtime traversal evidence.", "info"];
   if (mode === "observed_activity") return ["Observed activity", "At least one step is backed by observed message activity.", "good"];
   if (mode === "runtime_access") return ["Runtime access path", "Queue handles prove access modes, not MQPUT/MQGET operations.", "info"];
   return ["Configured semantic path", "The path is supported by configured/integration semantics rather than observed message activity.", "info"];
@@ -245,14 +249,16 @@ function renderNotFound(data) {
     <div class="route-diagnostic-grid">
       <div class="diagnostic-card"><span>Source</span><strong>${resc(data.source?.display_name || "Unknown")}</strong><p>${resc(entityQualifier(data.source))}</p></div>
       <div class="diagnostic-card"><span>Destination</span><strong>${resc(data.target?.display_name || "Unknown")}</strong><p>${resc(entityQualifier(data.target))}</p></div>
-      <div class="diagnostic-card"><span>Interpretation</span><strong>Evidence gap, not disconnection</strong><p>Additional MQ peer, ACE, DataPower, application activity, or routing evidence may be required.</p></div>
+      <div class="diagnostic-card"><span>Interpretation</span><strong>Evidence gap, not disconnection</strong><p>Additional middleware, application activity, routing, listener, transfer, or peer evidence may be required.</p></div>
     </div>${unresolvedHtml(data.unresolved)}`;
 }
 
 function renderFound(data) {
   const nodes = data.nodes || [];
   const steps = data.steps || [];
-  const [modeTitle, modeNote, modeTone] = modeCard(data.mode);
+  const semantics = data.semantics || {};
+  const isFileTransfer = semantics.route_domain === "file_transfer";
+  const [modeTitle, modeNote, modeTone] = modeCard(data.mode, semantics);
   const warnings = steps.filter((step) => step.semantic_warning).map((step) => step.semantic_warning);
   rq("routeTitle").textContent = `${data.source?.display_name || "Source"} → ${data.target?.display_name || "Destination"}`;
   rq("routeMeta").textContent = `${steps.length} semantic step${steps.length === 1 ? "" : "s"}`;
@@ -267,13 +273,57 @@ function renderFound(data) {
     journey += `<div class="route-node"><span>${resc(typeLabel(target?.semantic_type))}</span><strong>${resc(target?.display_name || target?.identity_key || "Unknown")}</strong><small>${resc(ownerLabel(target))}</small>${target?.semantic_type === "mq.queue" ? renderTransport(data.transport, target.entity_id) : ""}</div>`;
   });
 
+  const completion = semantics.transfer_completion === "observed" ? "Observed" : semantics.transfer_completion === "not_observed" ? "Not observed" : "Unknown";
+  const completionTone = semantics.transfer_completion === "observed" ? "good" : "info";
+  const runtimeCorroboration = Array.isArray(semantics.runtime_corroboration) ? semantics.runtime_corroboration : [];
+  const outcomeCard = isFileTransfer
+    ? `<div class="route-health-card ${completionTone}"><span>Transfer completion</span><strong>${resc(completion)}</strong><small>Route qualification is not proof that a file transfer completed.</small></div>`
+    : `<div class="route-health-card info"><span>Activity claim</span><strong>${data.mode === "observed_activity" ? "Observed" : "Not claimed"}</strong><small>${data.mode === "runtime_access" ? "Open access is not PUT/GET activity" : "Evidence semantics remain explicit"}</small></div>`;
+  const corroborationCard = semantics.qualified_route
+    ? `<div class="route-health-card info"><span>Runtime corroboration</span><strong>${runtimeCorroboration.length ? `${runtimeCorroboration.length} component${runtimeCorroboration.length === 1 ? "" : "s"}` : "None"}</strong><small>${isFileTransfer ? "Current listener/PNC evidence remains distinct from historical Site access." : "Runtime corroboration remains distinct from configured route evidence."}</small></div>`
+    : "";
+
   rq("routeResult").className = "route-result-shell";
   rq("routeResult").innerHTML = `<div class="route-health">
       <div class="route-health-card ${modeTone}"><span>Path semantics</span><strong>${resc(modeTitle)}</strong><small>${resc(modeNote)}</small></div>
       <div class="route-health-card"><span>Canonical estate</span><strong>${resc(String(data.estate?.estate_revision_id || "current").replace("estate_", ""))}</strong><small>${(data.estate?.source_revision_ids || []).length} reconciled source${(data.estate?.source_revision_ids || []).length === 1 ? "" : "s"}</small></div>
       <div class="route-health-card ${data.unresolved?.length ? "warn" : "good"}"><span>Unresolved on path</span><strong>${Number(data.unresolved?.length || 0).toLocaleString()}</strong><small>${data.unresolved?.length ? "Explicit gaps are preserved" : "No unresolved references attached to path entities"}</small></div>
-      <div class="route-health-card info"><span>Activity claim</span><strong>${data.mode === "observed_activity" ? "Observed" : "Not claimed"}</strong><small>${data.mode === "runtime_access" ? "Open access is not PUT/GET activity" : "Evidence semantics remain explicit"}</small></div>
+      ${outcomeCard}${corroborationCard}
     </div><div class="route-journey">${journey}</div>${warnings.length ? `<div class="route-warnings"><h3>Semantic cautions</h3>${[...new Set(warnings)].map((warning) => `<div class="route-warning"><i></i><span>${resc(warning)}</span></div>`).join("")}</div>` : ""}${unresolvedHtml(data.unresolved)}`;
+}
+
+async function traceCanonicalIds(fromId, toId, { synchronizeSelections = false } = {}) {
+  routeState.traceSequence += 1;
+  const sequence = routeState.traceSequence;
+  routeState.traceController?.abort();
+  const controller = new AbortController();
+  routeState.traceController = controller;
+
+  rq("routeTitle").textContent = "Tracing canonical semantics…";
+  rq("routeMeta").textContent = "Current estate";
+  rq("routeResult").className = "route-empty";
+  rq("routeResult").textContent = "Querying the canonical estate for the strongest supported semantic path and technology-specific evidence…";
+  try {
+    const data = await routeApi(`/api/v2/routes/trace?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}&max_depth=12`, { signal: controller.signal });
+    if (sequence !== routeState.traceSequence) return null;
+    if (!synchronizeSelections && (routeState.from?.entity_id !== fromId || routeState.to?.entity_id !== toId)) return null;
+    if (synchronizeSelections) {
+      setSelection("from", data.source, { quiet: true, preserveResult: true });
+      setSelection("to", data.target, { quiet: true, preserveResult: true });
+    }
+    if (data.found) renderFound(data); else renderNotFound(data);
+    return data;
+  } catch (error) {
+    if (error?.name === "AbortError") return null;
+    if (sequence !== routeState.traceSequence) return null;
+    rq("routeTitle").textContent = "Route query unavailable";
+    rq("routeMeta").textContent = error.code || "Error";
+    rq("routeResult").className = "route-diagnostic";
+    rq("routeResult").innerHTML = `<div class="route-diagnostic-intro"><h3>Canonical route query failed</h3><p>${resc(error.message)}</p></div>`;
+    return null;
+  } finally {
+    if (routeState.traceController === controller) routeState.traceController = null;
+  }
 }
 
 async function runRoute() {
@@ -284,33 +334,7 @@ async function runRoute() {
     rq("routeResult").innerHTML = `<div class="route-diagnostic-intro"><h3>Route endpoints are not resolved</h3><p>Select a result from each search list; typed text alone is not treated as an entity identity.</p></div>`;
     return;
   }
-
-  routeState.traceSequence += 1;
-  const sequence = routeState.traceSequence;
-  routeState.traceController?.abort();
-  const controller = new AbortController();
-  routeState.traceController = controller;
-  const fromId = routeState.from.entity_id;
-  const toId = routeState.to.entity_id;
-
-  rq("routeTitle").textContent = "Tracing canonical semantics…";
-  rq("routeMeta").textContent = "Current estate";
-  rq("routeResult").className = "route-empty";
-  rq("routeResult").textContent = "Querying the canonical estate for the strongest supported semantic path and MQ transport expansion…";
-  try {
-    const data = await routeApi(`/api/v2/routes/trace?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}&max_depth=12`, { signal: controller.signal });
-    if (sequence !== routeState.traceSequence || routeState.from?.entity_id !== fromId || routeState.to?.entity_id !== toId) return;
-    if (data.found) renderFound(data); else renderNotFound(data);
-  } catch (error) {
-    if (error?.name === "AbortError") return;
-    if (sequence !== routeState.traceSequence) return;
-    rq("routeTitle").textContent = "Route query unavailable";
-    rq("routeMeta").textContent = error.code || "Error";
-    rq("routeResult").className = "route-diagnostic";
-    rq("routeResult").innerHTML = `<div class="route-diagnostic-intro"><h3>Canonical route query failed</h3><p>${resc(error.message)}</p></div>`;
-  } finally {
-    if (routeState.traceController === controller) routeState.traceController = null;
-  }
+  await traceCanonicalIds(routeState.from.entity_id, routeState.to.entity_id);
 }
 
 function swapEndpoints() {
@@ -331,12 +355,12 @@ function configureRouteCopy() {
     const badge = head.querySelector(".route-mode-badge");
     if (kicker) kicker.textContent = "Canonical semantic trace";
     if (title) title.textContent = "What path can the current evidence support?";
-    if (copy) copy.textContent = "Trace application/process queue access, configured queue resolution, integration delivery semantics and MQ transport without converting object-handle access into false PUT/GET activity.";
+    if (copy) copy.textContent = "Trace MQ, ACE, DataPower and file-transfer delivery semantics without turning configuration, historical access, runtime handles or connectivity into stronger transaction claims than the evidence supports.";
     if (badge) badge.innerHTML = "<i></i>Canonical · evidence-aware";
   }
   const help = document.querySelector(".route-help-copy");
-  if (help) help.innerHTML = "<strong>How to read the result:</strong> runtime open-for-output/input is access evidence only. Actual PUT/GET activity is shown only when activity evidence exists. QREMOTE/XMITQ/channel transport is expanded separately from logical queue resolution.";
-  if (rq("routeSuggestions")) rq("routeSuggestions").innerHTML = `<span>Search two canonical entities above. System queues remain hidden unless you explicitly search for <strong>SYSTEM.</strong></span>`;
+  if (help) help.innerHTML = "<strong>How to read the result:</strong> each route segment retains its own evidence class and time scope. MQ handle access is not PUT/GET activity; an evidence-qualified FTP topology path is not proof of a completed file transfer.";
+  if (rq("routeSuggestions")) rq("routeSuggestions").innerHTML = `<span>Search two canonical entities above, or inspect a qualified FTP route below. System queues remain hidden unless you explicitly search for <strong>SYSTEM.</strong></span>`;
 }
 
 function initCanonicalRoutes() {
@@ -357,5 +381,11 @@ function initCanonicalRoutes() {
     }
   });
 }
+
+window.osiTraceCanonicalRoute = async (fromId, toId) => {
+  const data = await traceCanonicalIds(String(fromId || ""), String(toId || ""), { synchronizeSelections: true });
+  rq("routeResult")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  return data;
+};
 
 initCanonicalRoutes();
