@@ -15,8 +15,9 @@ import "/phase2g-investigation-clarity.js?v=20260911-1";
 import "/phase2h-topology-impact.js?v=20260911-1";
 import "/administration-ops.js?v=20260911-1";
 import "/phase2o-demo-manual-mode.js?v=20260912-1";
+import "/ftp-operator.js?v=20260914-1";
 
-const UI_ASSET_REVISION = "20260911-7";
+const UI_ASSET_REVISION = "20260914-1";
 
 const shellCopy = {
   overview: ["Overview", "Evidence-backed operational attention across the current canonical middleware estate."],
@@ -25,7 +26,7 @@ const shellCopy = {
   servers: ["Servers", "Physical middleware hosts and confirmed queue-manager placement. Client IPs remain application/network evidence, not physical servers."],
   middleware: ["Middleware", "Legacy snapshot view retained while middleware-specific canonical projections are migrated."],
   applications: ["Applications", "Legacy snapshot view retained while application-specific canonical projections are migrated."],
-  routes: ["Routes", "Trace canonical delivery semantics, runtime queue access and MQ transport while keeping access evidence distinct from actual PUT/GET activity."],
+  routes: ["Routes", "Trace evidence-qualified MQ, ACE, DataPower and file-transfer routes while keeping topology, runtime access and transaction outcomes distinct."],
   snapshots: ["Collection", "Evidence sources, imports and retained canonical revisions for traceability."],
   administration: ["Administration", "Manual OSI evidence handoff for the demo: topology and operational evaluations arrive as transferred artifacts; no direct middleware connection is required."],
 };
@@ -80,6 +81,7 @@ async function navigate(view) {
   try {
     if (view === "routes") {
       await ensureCanonicalRoutes();
+      await window.osiRefreshFtpOperator?.();
       return;
     }
     if (view === "servers") {
@@ -150,7 +152,10 @@ document.addEventListener("click", (event) => {
       setTimeout(() => window.osiRefreshEvidenceSemantics?.(), 240);
       setTimeout(() => window.osiRefreshTriageCompression?.(), 300);
     }
-    if (view === "routes") setTimeout(() => window.osiRefreshWorkstationUI?.(), 120);
+    if (view === "routes") {
+      setTimeout(() => window.osiRefreshWorkstationUI?.(), 120);
+      setTimeout(() => window.osiRefreshFtpOperator?.(), 220);
+    }
     if (view === "administration") setTimeout(() => window.osiRenderAdministrationOps?.(), 0);
   }
 });
