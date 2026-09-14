@@ -44,4 +44,8 @@ s = s.replace(
     'The normalizer fails closed if a route does not include an independently corroborated PNC endpoint.',
     'The normalizer fails closed unless listener evidence is current+observed and PNC evidence is current+observed+independently corroborated.',
 )
+s = s.replace(
+    "if (site.listener_resolution !== 'resolved') fail(`route ${route.key} cannot qualify Site ${site.name} unless listener_resolution=resolved`);",
+    "if (site.listener_resolution === 'unresolved') fail(`route ${route.key} cannot qualify Site ${site.name} while listener_resolution=unresolved`);",
+)
 p.write_text(s)
