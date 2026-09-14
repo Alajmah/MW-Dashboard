@@ -1,0 +1,44 @@
+name: FTP evidence check
+
+on:
+  pull_request:
+    paths:
+      - "scripts/normalize-ftp-evidence.mjs"
+      - "scripts/test-ftp-observation-bundle.mjs"
+      - "scripts/fixtures/ftp-projection-sanitized.json"
+      - "docs/phase-ftp-evidence-integration.md"
+      - ".github/workflows/ftp-evidence-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/normalize-ftp-evidence.mjs"
+      - "scripts/test-ftp-observation-bundle.mjs"
+      - "scripts/fixtures/ftp-projection-sanitized.json"
+      - "docs/phase-ftp-evidence-integration.md"
+      - ".github/workflows/ftp-evidence-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Node syntax
+        run: |
+          node --check scripts/normalize-ftp-evidence.mjs
+          node --check scripts/test-ftp-observation-bundle.mjs
+
+      - name: FTP observation-bundle regressions
+        run: node scripts/test-ftp-observation-bundle.mjs
+
+      - name: Generate sanitized FTP bundle
+        run: |
+          node scripts/normalize-ftp-evidence.mjs \
+            --input scripts/fixtures/ftp-projection-sanitized.json \
+            --output /tmp/ftp-observation-bundle.json
+          node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync("/tmp/ftp-observation-bundle.json","utf8")); if(b.schema_version!=="osi.observation.bundle/v2") process.exit(1); console.log(`generated ${b.entities.length} entities / ${b.relations.length} relations`);'
