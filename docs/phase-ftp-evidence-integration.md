@@ -88,7 +88,7 @@ This avoids the recovery problem where changed evidence could collide with a pre
 
 ## Review hardening
 
-The production boundary is fail-closed: a stopped Site cannot qualify a route; an unresolved Site-to-listener mapping cannot qualify a route; PNC qualification requires provenance-bearing current observations from at least two distinct runtime source kinds; and each unresolved Site reference carries its reason in the top-level semantic-import contract field as well as operator-facing properties.
+The production boundary is fail-closed: every Site must carry an explicit `started` or `stopped` state; only an explicitly `started` Site with `listener_resolution = qualified-inferred` can qualify a route; blank evidence references are rejected; PNC qualification requires provenance-bearing current observations from at least two distinct runtime source kinds; shared gateway endpoints are projected in deterministic route-key order; and each unresolved Site reference carries its reason in the top-level semantic-import contract field as well as operator-facing properties.
 
 These rules prevent current-state, independence, determinism, or unresolved-reason semantics from being reconstructed later by assumption.
 

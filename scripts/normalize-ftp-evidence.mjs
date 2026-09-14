@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 
 const INPUT_SCHEMA = 'osi.ftp.projection/v1';
 const OUTPUT_SCHEMA = 'osi.observation.bundle/v2';
-const ADAPTER_VERSION = '0.3.0';
+const ADAPTER_VERSION = '0.4.0';
 const NORMALIZER_VERSION = '3.1.0';
 const IMPORT_COVERAGE_MODES = new Set(['complete', 'point_in_time', 'partial', 'failed', 'not_collected']);
 const FORBIDDEN_INPUT_KEY = /(password|passwd|secret|token|credential|private[_-]?key|certificate[_-]?content|service[_-]?account|command[_-]?line)/i;
@@ -141,8 +141,8 @@ function byKey(items, name) {
   return map;
 }
 function requireEvidence(item, label) {
-  if (!item?.evidence_ref || typeof item.evidence_ref !== 'string') fail(`${label} evidence_ref is required`);
-  return item.evidence_ref;
+  if (typeof item?.evidence_ref !== 'string' || !item.evidence_ref.trim()) fail(`${label} evidence_ref is required`);
+  return item.evidence_ref.trim();
 }
 function requireCurrentObserved(item, label) {
   if (item?.time_scope !== 'current') fail(`${label} must set time_scope=current`);
@@ -203,10 +203,10 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
     completed_at: generatedAt,
     source: { kind: 'osi_ftp_projection', id: source, display_name: 'OSI EFT + DMZ Gateway + MQ MFT projection' },
     metadata: {
-      projection_profile: 'eft-dmz-mft/current-topology-v3',
+      projection_profile: 'eft-dmz-mft/current-topology-v4',
       adapter_version: ADAPTER_VERSION,
       historical_logs_promoted_to_runtime: false,
-      epistemic_policy: 'current started-Site/listener observations may be composed with historical Site-access evidence only as an inferred topology route; PNC qualification requires provenance-bearing current runtime corroboration from at least two distinct source kinds; completed file transfer remains unproven',
+      epistemic_policy: 'current explicitly started Sites with listener_resolution=qualified-inferred may be composed with current listener observations and historical Site-access evidence only as an inferred topology route; PNC qualification requires provenance-bearing current runtime corroboration from at least two distinct source kinds; completed file transfer remains unproven',
     },
   };
   const b = new Builder(run);
@@ -260,6 +260,7 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
   for (const site of sites) {
     requireCurrentObserved(site, `site ${site.key}`);
     const evidenceRef = requireEvidence(site, `site ${site.key}`);
+    if (!['started','stopped'].includes(site.status)) fail(`site ${site.key} status must be started or stopped`);
     const server = serverByKey.get(site.server_key);
     if (!server) fail(`site ${site.key} references unknown server ${site.server_key}`);
     if (server.role !== 'eft_backend') fail(`site ${site.key} must reference an EFT backend server`);
@@ -268,12 +269,12 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
       name: site.name,
     }, site.name, generatedAt, 'observed', {
       evidenceRef,
-      status: site.status ?? 'started',
+      status: site.status,
       properties: {
         endpoint_kind: 'eft_site',
         server_key: site.server_key,
         site_name: site.name,
-        site_started: site.status !== 'stopped',
+        site_started: site.status === 'started',
         runtime_sample: canonicalize(site.runtime_sample ?? {}),
         listener_resolution: site.listener_resolution ?? 'unresolved',
         historical_context: canonicalize(site.historical_context ?? {}),
@@ -323,11 +324,11 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
   }
 
   const resolvedSiteKeys = new Set();
-  for (const route of routes) {
+  for (const route of sortByKey(routes)) {
     const site = siteByKey.get(route.site_key);
     if (!site) fail(`route ${route.key} references unknown site ${route.site_key}`);
     if (site.status !== 'started') fail(`route ${route.key} cannot qualify Site ${site.name} unless status=started`);
-    if (site.listener_resolution === 'unresolved') fail(`route ${route.key} cannot qualify Site ${site.name} while listener_resolution=unresolved`);
+    if (site.listener_resolution !== 'qualified-inferred') fail(`route ${route.key} cannot qualify Site ${site.name} unless listener_resolution=qualified-inferred`);
     const gateway = serverByKey.get(route.gateway_server_key);
     if (!gateway) fail(`route ${route.key} references unknown gateway ${route.gateway_server_key}`);
     if (gateway.role !== 'dmz_gateway') fail(`route ${route.key} gateway must have role=dmz_gateway`);
