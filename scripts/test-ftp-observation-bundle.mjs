@@ -3,6 +3,12 @@ import { readFile } from 'node:fs/promises';
 import { normalizeProjection, validateBundle } from './normalize-ftp-evidence.mjs';
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
+function clone(value) { return JSON.parse(JSON.stringify(value)); }
+function rejectedWith(input, pattern) {
+  try { normalizeProjection(input); }
+  catch (error) { return pattern.test(String(error)); }
+  return false;
+}
 
 const fixtureUrl = new URL('./fixtures/ftp-projection-sanitized.json', import.meta.url);
 const raw = await readFile(fixtureUrl, 'utf8');
@@ -13,29 +19,47 @@ for (const forbidden of [/SJEDITB/i, /10\.132\./, /217\.12\./, /SVFTA/i, /SVFTC/
 }
 
 const first = normalizeProjection(fixture);
-const second = normalizeProjection(JSON.parse(raw));
+const second = normalizeProjection(clone(fixture));
 assert(validateBundle(first) === true, 'bundle validation failed');
 assert(JSON.stringify(first) === JSON.stringify(second), 'normalization is not deterministic');
 assert(first.schema_version === 'osi.observation.bundle/v2', 'wrong output schema');
 assert(first.run.normalizer_version === '3.1.0', 'wrong normalizer version');
+assert(first.run.collector_version === '0.2.0', 'wrong adapter version');
+assert(first.run.metadata?.historical_logs_promoted_to_runtime === false, 'historical evidence promotion guard missing');
 
 const entities = first.entities;
 const relations = first.relations;
 const byRef = new Map(entities.map(x=>[x.ref,x]));
 
+assert(entities.length === 37, `expected 37 entities, got ${entities.length}`);
+assert(relations.length === 30, `expected 30 relations, got ${relations.length}`);
+assert(first.unresolved_references.length === 2, `expected 2 unresolved references, got ${first.unresolved_references.length}`);
+assert(first.unresolved_references.every(x=>x.state==='unresolved' && x.properties?.unresolved_kind==='site_listener_mapping'), 'unresolved Site mappings are malformed');
+
+const importCoverageModes = new Set(['complete','point_in_time','partial','failed','not_collected']);
+assert(first.coverage.every(x=>importCoverageModes.has(x.mode)), 'bundle contains a coverage mode rejected by semantic-import');
+assert(first.coverage.some(x=>x.object_class==='filetransfer.endpoint' && x.mode==='partial'), 'endpoint coverage should remain partial while Sites are unresolved');
+
 const sites = entities.filter(x=>x.semantic_type==='filetransfer.endpoint' && x.properties?.endpoint_kind==='eft_site');
 assert(sites.length === 5, `expected 5 EFT Site endpoints, got ${sites.length}`);
 
 const qualified = relations.filter(x=>x.semantic_type==='integration.routes_to');
-assert(qualified.length === 3, `expected 3 qualified inbound Site routes, got ${qualified.length}`);
+assert(qualified.length === 3, `expected 3 qualified inbound Site paths, got ${qualified.length}`);
 for (const route of qualified) {
-  assert(route.evidence_class === 'observed', 'qualified FTP route must remain observed');
+  assert(route.evidence_class === 'inferred', 'qualified FTP topology route must remain inferred');
   assert(route.properties?.qualified_route === true, 'qualified_route flag missing');
-  assert(route.properties?.epistemic === 'observed', 'FTP route epistemic must be observed');
-  assert(route.properties?.runtime_transfer_completion === false, 'Site access was promoted to transfer completion');
+  assert(route.properties?.epistemic === 'inferred', 'FTP route epistemic must be inferred');
+  assert(route.properties?.runtime_transfer_completion === false, 'Site path was promoted to transfer completion');
   assert(route.properties?.deterministic === true, 'route derivation must be deterministic');
+  assert(route.properties?.site_access_evidence?.time_scope === 'historical', 'historical Site-access time scope was flattened');
+  assert(route.properties?.site_access_evidence?.evidence_class === 'observed', 'historical Site-access evidence class changed');
+  assert(route.properties?.current_listener_evidence?.time_scope === 'current', 'listener evidence is not current');
+  assert(route.properties?.current_listener_evidence?.evidence_class === 'observed', 'listener evidence is not observed');
   assert(Array.isArray(route.properties?.runtime_corroboration) && route.properties.runtime_corroboration.length === 1, 'PNC corroboration missing');
-  assert(route.properties.runtime_corroboration[0].independently_corroborated === true, 'PNC corroboration is not independently supported');
+  const pnc = route.properties.runtime_corroboration[0];
+  assert(pnc.time_scope === 'current', 'PNC corroboration time scope is not current');
+  assert(pnc.evidence_class === 'observed', 'PNC corroboration is not observed');
+  assert(pnc.independently_corroborated === true, 'PNC corroboration is not independently supported');
   assert(route.properties?.semantic_warning, 'semantic warning missing');
   assert(byRef.get(route.source_ref)?.semantic_type === 'filetransfer.flow', 'qualified route source is not filetransfer.flow');
   assert(byRef.get(route.target_ref)?.semantic_type === 'filetransfer.endpoint', 'qualified route target is not filetransfer.endpoint');
@@ -46,6 +70,7 @@ for (const unresolvedName of ['External FTPS','Internal User']) {
   assert(site, `missing unresolved Site ${unresolvedName}`);
   assert(site.properties?.listener_resolution === 'unresolved', `${unresolvedName} was silently resolved`);
   assert(!qualified.some(x=>x.target_ref===site.ref), `${unresolvedName} was promoted to a qualified route`);
+  assert(first.unresolved_references.some(x=>x.source_ref===site.ref), `${unresolvedName} is not represented as an unresolved reference`);
 }
 
 const pncEndpoints = entities.filter(x=>x.semantic_type==='filetransfer.endpoint' && x.properties?.endpoint_kind==='peer_notification_channel');
@@ -73,30 +98,52 @@ for (const forbidden of ['password','passwd','mftcredentials.xml','service_accou
   assert(!serialized.includes(forbidden), `bundle contains disallowed sensitive material: ${forbidden}`);
 }
 
-const unsafe = JSON.parse(raw);
+const unsafe = clone(fixture);
 unsafe.mft_agents[0].password = 'should-never-pass';
-let rejected = false;
-try { normalizeProjection(unsafe); } catch (error) { rejected = /forbidden sensitive input key/.test(String(error)); }
-assert(rejected, 'sensitive input guard did not fail closed');
+assert(rejectedWith(unsafe, /forbidden sensitive input key/), 'sensitive input guard did not fail closed');
 
-const invalidCorroboration = JSON.parse(raw);
-invalidCorroboration.routes[0].pnc.independently_corroborated = false;
-rejected = false;
-try { normalizeProjection(invalidCorroboration); } catch (error) { rejected = /independently corroborated PNC/.test(String(error)); }
-assert(rejected, 'uncorroborated PNC route was accepted');
+const missingTimeScope = clone(fixture);
+delete missingTimeScope.hosts[0].time_scope;
+assert(rejectedWith(missingTimeScope, /must set time_scope=current/), 'missing current time scope was silently promoted');
 
-const historicalRoute = JSON.parse(raw);
-historicalRoute.routes[0].time_scope = 'historical';
-rejected = false;
-try { normalizeProjection(historicalRoute); } catch (error) { rejected = /must be current/.test(String(error)); }
-assert(rejected, 'historical route was promoted to current canonical topology');
+const missingEvidenceClass = clone(fixture);
+delete missingEvidenceClass.sites[0].evidence_class;
+assert(rejectedWith(missingEvidenceClass, /must use evidence_class=observed/), 'missing observed evidence class was silently promoted');
+
+const badPnc = clone(fixture);
+badPnc.routes[0].pnc.independently_corroborated = false;
+assert(rejectedWith(badPnc, /independently corroborated PNC/), 'uncorroborated PNC route was accepted');
+
+const historicalPnc = clone(fixture);
+historicalPnc.routes[0].pnc.time_scope = 'historical';
+assert(rejectedWith(historicalPnc, /PNC must set time_scope=current/), 'historical PNC evidence was promoted to current runtime corroboration');
+
+const currentSiteAccess = clone(fixture);
+currentSiteAccess.routes[0].site_access.time_scope = 'current';
+assert(rejectedWith(currentSiteAccess, /Site access must set time_scope=historical/), 'Site-access historical boundary was lost');
+
+const badGatewayRole = clone(fixture);
+badGatewayRole.routes[0].gateway_server_key = 'eft:EFT01';
+assert(rejectedWith(badGatewayRole, /gateway must have role=dmz_gateway/), 'route was allowed to attach a gateway listener to a non-DMZ server');
+
+const mutatedContent = clone(fixture);
+mutatedContent.routes[0].listener.port = 2222;
+const mutatedBundle = normalizeProjection(mutatedContent);
+assert(mutatedBundle.run.run_id !== first.run.run_id, 'run_id did not change when semantic content changed');
+
+const reordered = clone(fixture);
+for (const name of ['hosts','servers','sites','routes','storage_paths','mft_agents','gaps']) reordered[name].reverse();
+const reorderedBundle = normalizeProjection(reordered);
+assert(reorderedBundle.run.run_id === first.run.run_id, 'run_id changed only because top-level keyed arrays were reordered');
 
 console.log(JSON.stringify({
   status: 'PASS',
   run_id: first.run.run_id,
   entities: first.entities.length,
   relations: first.relations.length,
-  qualified_inbound_routes: qualified.length,
+  unresolved: first.unresolved_references.length,
+  qualified_inbound_paths: qualified.length,
+  route_epistemic: 'inferred',
   unresolved_sites: 2,
   pnc_endpoints: pncEndpoints.length,
   mft_agents: mftAgents.length,
