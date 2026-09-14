@@ -40,6 +40,7 @@ function ensureFtpPanel() {
   if (!routesView || !workbench) return null;
   let panel = document.getElementById("ftpOperatorPanel");
   if (panel) return panel;
+
   panel = document.createElement("section");
   panel.id = "ftpOperatorPanel";
   panel.className = "panel ftp-operator-panel";
@@ -47,76 +48,226 @@ function ensureFtpPanel() {
   panel.innerHTML = `
     <div class="ftp-operator-head">
       <div>
-        <p class="section-kicker">File-transfer estate</p>
-        <h2>Qualified FTP topology</h2>
-        <p>Evidence-qualified EFT/DMZ paths remain distinct from current traversal and completed-transfer claims.</p>
+        <p class="section-kicker">File-transfer service paths</p>
+        <h2>Start with the path you care about</h2>
+        <p>OSI separates what is current, historical, inferred, and still unknown so operators can follow the supported path without mistaking topology for a completed transfer.</p>
       </div>
-      <span class="route-mode-badge"><i></i>FTP · evidence-qualified</span>
+      <span class="route-mode-badge"><i></i>FTP · canonical estate</span>
     </div>
-    <div id="ftpOperatorMetrics" class="ftp-operator-metrics"></div>
+    <div id="ftpOrientation" class="ftp-orientation" aria-live="polite"></div>
     <div class="ftp-operator-grid">
-      <div>
-        <div class="ftp-subhead"><h3>Qualified routes</h3><span id="ftpRouteCount"></span></div>
+      <section aria-labelledby="ftpPathsHeading">
+        <div class="ftp-subhead">
+          <div><p class="section-kicker">Understand</p><h3 id="ftpPathsHeading">Service paths</h3></div>
+          <span id="ftpRouteCount"></span>
+        </div>
         <div id="ftpQualifiedRoutes" class="ftp-route-list"></div>
-      </div>
-      <div>
-        <div class="ftp-subhead"><h3>Needs mapping</h3><span id="ftpGapCount"></span></div>
+      </section>
+      <aside aria-labelledby="ftpGapsHeading">
+        <div class="ftp-subhead">
+          <div><p class="section-kicker">Attention</p><h3 id="ftpGapsHeading">Needs mapping</h3></div>
+          <span id="ftpGapCount"></span>
+        </div>
         <div id="ftpMappingGaps" class="ftp-gap-list"></div>
-      </div>
+      </aside>
     </div>
-    <div class="ftp-operator-footnote">A qualified route is a topology claim. Historical Site access, current listener evidence, PNC runtime corroboration, and transaction completion are shown as separate evidence dimensions.</div>`;
+    <div class="ftp-operator-footnote"><strong>How to read this:</strong> the path lane is an evidence-backed topology projection, not a transaction timeline. Use <em>Inspect route evidence</em> to prove the underlying claims in the canonical route workbench.</div>`;
   workbench.parentNode.insertBefore(panel, workbench);
   return panel;
 }
 
-function evidenceTag(label, tone = "info") {
-  return `<span class="ftp-evidence-tag ${ftpEscape(tone)}">${ftpEscape(label)}</span>`;
+function evidenceTag(label, tone = "info", title = "") {
+  const titleAttr = title ? ` title="${ftpEscape(title)}"` : "";
+  return `<span class="ftp-evidence-tag ${ftpEscape(tone)}"${titleAttr}>${ftpEscape(label)}</span>`;
 }
 
 function completionLabel(value) {
-  if (value === "observed") return "Observed";
-  if (value === "not_observed") return "Not observed";
-  return "Unknown";
+  if (value === "observed") return "Completed transfer observed";
+  if (value === "not_observed") return "No completed transfer observed";
+  return "Transfer completion unknown";
 }
 
-function routeCard(trace) {
+function readableSourceKind(value) {
+  const labels = {
+    dmz_gateway_runtime: "DMZ gateway runtime",
+    eft_runtime: "EFT runtime",
+  };
+  return labels[value] || String(value || "runtime source").replaceAll("_", " ");
+}
+
+function formatWindow(start, end) {
+  if (!start && !end) return "Historical activity window retained";
+  const short = (value) => {
+    if (!value) return "unknown";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return parsed.toISOString().replace(".000Z", "Z");
+  };
+  return `${short(start)} → ${short(end)}`;
+}
+
+function routeScope(trace, serverByKey) {
   const semantics = trace.semantics || {};
   const step = trace.steps?.[0] || {};
-  const evidence = Array.isArray(step.evidence_classes) ? step.evidence_classes : [];
-  const corroboration = Array.isArray(semantics.runtime_corroboration) ? semantics.runtime_corroboration : [];
+  const properties = step.properties || {};
   const siteAccess = semantics.site_access_evidence || {};
   const listener = semantics.current_listener_evidence || {};
+  const corroboration = Array.isArray(semantics.runtime_corroboration) ? semantics.runtime_corroboration : [];
+  const runtime = corroboration[0] || {};
+  const gatewayKey = properties.gateway_server_key || runtime.gateway_server_key || null;
+  const gateway = gatewayKey ? serverByKey.get(String(gatewayKey)) : null;
+  const gatewayLabel = gateway?.display_name || gatewayKey || "DMZ gateway";
+  const pncEndpoint = runtime.endpoint || "PNC endpoint";
+  const sourceKinds = Array.isArray(runtime.sources)
+    ? [...new Set(runtime.sources.map((item) => item?.source_kind).filter(Boolean))].map(readableSourceKind)
+    : [];
+  return {
+    properties,
+    siteAccess,
+    listener,
+    corroboration,
+    runtime,
+    gatewayLabel,
+    pncEndpoint,
+    sourceKinds,
+  };
+}
+
+function pathNode(kind, label, evidence, tone, supporting) {
+  return `<div class="ftp-path-node">
+    <span class="ftp-path-node-kind">${ftpEscape(kind)}</span>
+    <strong>${ftpEscape(label)}</strong>
+    <small>${ftpEscape(supporting)}</small>
+    ${evidenceTag(evidence, tone)}
+  </div>`;
+}
+
+function pathConnector(label) {
+  return `<div class="ftp-path-connector" aria-hidden="true"><span></span><small>${ftpEscape(label)}</small><b>›</b></div>`;
+}
+
+function routeCard(trace, serverByKey) {
+  const semantics = trace.semantics || {};
+  const scope = routeScope(trace, serverByKey);
   const completion = semantics.transfer_completion || "unknown";
-  const tags = [
-    evidenceTag(`${semantics.derived_epistemic || evidence[0] || "unknown"} topology`),
-    siteAccess.time_scope === "historical" ? evidenceTag("historical Site access") : evidenceTag("Site access unknown", "warn"),
-    listener.time_scope === "current" ? evidenceTag("current listener") : evidenceTag("listener unknown", "warn"),
-    corroboration.length ? evidenceTag("current PNC corroboration") : evidenceTag("PNC corroboration absent", "warn"),
+  const hasCurrentListener = scope.listener.time_scope === "current";
+  const hasCurrentPnc = scope.corroboration.some((item) => item?.time_scope === "current" && item?.independently_corroborated === true);
+  const runtimeBoundaryCurrent = hasCurrentListener && hasCurrentPnc;
+  const topologyLabel = semantics.derived_epistemic === "inferred" ? "Qualified · inferred" : "Qualified";
+  const outcomeTone = completion === "observed" ? "ok" : completion === "not_observed" ? "neutral" : "warn";
+  const sourceName = trace.source?.display_name || "File-transfer access context";
+  const targetName = trace.target?.display_name || "EFT Site";
+  const sourceKinds = scope.sourceKinds.length ? scope.sourceKinds.join(" + ") : "Independent runtime sources";
+
+  const nodes = [
+    pathNode(
+      "Access context",
+      sourceName,
+      scope.siteAccess.time_scope === "historical" ? "Historical observed" : "Evidence unknown",
+      scope.siteAccess.time_scope === "historical" ? "history" : "warn",
+      formatWindow(scope.siteAccess.activity_window_start, scope.siteAccess.activity_window_end),
+    ),
+    pathNode(
+      "DMZ listener",
+      scope.listener.endpoint || "Listener endpoint",
+      hasCurrentListener ? "Current observed" : "Current evidence unknown",
+      hasCurrentListener ? "ok" : "warn",
+      scope.gatewayLabel,
+    ),
+    pathNode(
+      "PNC boundary",
+      scope.pncEndpoint,
+      hasCurrentPnc ? "Current corroborated" : "Corroboration absent",
+      hasCurrentPnc ? "ok" : "warn",
+      sourceKinds,
+    ),
+    pathNode(
+      "EFT Site",
+      targetName,
+      "Topology destination",
+      "info",
+      "Current canonical Site object; traversal is not implied",
+    ),
   ];
+
   return `<article class="ftp-route-card">
     <div class="ftp-route-card-main">
       <div>
-        <span class="ftp-route-kicker">Qualified topology route</span>
-        <strong>${ftpEscape(trace.source?.display_name || "File-transfer flow")}</strong>
-        <small>→ ${ftpEscape(trace.target?.display_name || "Site endpoint")}</small>
+        <span class="ftp-route-kicker">Service path</span>
+        <strong>${ftpEscape(sourceName)}</strong>
+        <small>Destination · ${ftpEscape(targetName)}</small>
       </div>
-      <div class="ftp-route-outcome">
-        <span>Transfer completion</span>
-        <b>${ftpEscape(completionLabel(completion))}</b>
+      <div class="ftp-route-statuses">
+        ${evidenceTag(topologyLabel, "info", "The route is qualified by the normalization boundary but remains an inferred topology claim.")}
+        ${evidenceTag(runtimeBoundaryCurrent ? "Runtime boundary current" : "Runtime boundary incomplete", runtimeBoundaryCurrent ? "ok" : "warn")}
+        ${evidenceTag(completionLabel(completion), outcomeTone)}
       </div>
     </div>
-    <div class="ftp-evidence-tags">${tags.join("")}</div>
-    <p>${ftpEscape(trace.explanation || "Qualified topology evidence is available; transaction outcome remains separately evidenced.")}</p>
-    <button type="button" class="ghost ftp-inspect-route" data-from="${ftpEscape(trace.source?.entity_id)}" data-to="${ftpEscape(trace.target?.entity_id)}">Inspect route evidence</button>
+
+    <div class="ftp-path-lane" aria-label="Evidence-backed file-transfer path components">
+      ${nodes[0]}
+      ${pathConnector("maps to")}
+      ${nodes[1]}
+      ${pathConnector("corroborates")}
+      ${nodes[2]}
+      ${pathConnector("supports route to")}
+      ${nodes[3]}
+    </div>
+
+    <div class="ftp-route-actions">
+      <button type="button" class="secondary ftp-inspect-route" data-from="${ftpEscape(trace.source?.entity_id)}" data-to="${ftpEscape(trace.target?.entity_id)}">Inspect route evidence</button>
+      <details class="ftp-qualification-detail">
+        <summary>Why is this path qualified?</summary>
+        <div>
+          <dl>
+            <div><dt>Site activity</dt><dd>Historical observed evidence · ${ftpEscape(formatWindow(scope.siteAccess.activity_window_start, scope.siteAccess.activity_window_end))}</dd></div>
+            <div><dt>Listener</dt><dd>${hasCurrentListener ? "Current observed" : "Unknown"} · ${ftpEscape(scope.listener.endpoint || "No endpoint")}</dd></div>
+            <div><dt>PNC</dt><dd>${hasCurrentPnc ? "Current and independently corroborated" : "Not corroborated"} · ${ftpEscape(scope.pncEndpoint)}</dd></div>
+            <div><dt>Runtime sources</dt><dd>${ftpEscape(sourceKinds)}</dd></div>
+            <div><dt>Transfer outcome</dt><dd>${ftpEscape(completionLabel(completion))}</dd></div>
+          </dl>
+          <p>${ftpEscape(trace.explanation || "Route qualification and transfer outcome remain separate claims.")}</p>
+        </div>
+      </details>
+    </div>
   </article>`;
 }
 
 function gapCard(gap, endpointById) {
   const source = endpointById.get(String(gap.source_entity_id));
   return `<article class="ftp-gap-card">
-    <div><span>${ftpEscape(gap.state || "unknown")}</span><strong>${ftpEscape(source?.display_name || gap.vendor_value || "File-transfer endpoint")}</strong></div>
-    <p>${ftpEscape(gap.reason || "No evidence-backed current mapping is available.")}</p>
+    <div class="ftp-gap-head">
+      <span>Mapping gap</span>
+      <strong>${ftpEscape(source?.display_name || gap.vendor_value || "File-transfer endpoint")}</strong>
+    </div>
+    <p>${ftpEscape(gap.reason || "No evidence-backed current Site/listener mapping is available.")}</p>
+    <small>OSI keeps this unknown explicit. It is not promoted into an outage or incident by absence of mapping evidence alone.</small>
   </article>`;
+}
+
+function orientationMarkup({ traces, gaps, currentBoundary, completionSummary, servers }) {
+  const allBoundaryCurrent = traces.length > 0 && currentBoundary === traces.length;
+  const attention = gaps.length
+    ? `${gaps.length} Site${gaps.length === 1 ? "" : "s"} still need evidence-backed mapping`
+    : "No unresolved FTP Site/listener mappings";
+  return `<div class="ftp-orientation-summary">
+    <div>
+      <span>Orient</span>
+      <strong>${traces.length} qualified path${traces.length === 1 ? "" : "s"} · ${attention}</strong>
+      <small>${allBoundaryCurrent ? "Every qualified path has a current listener and independently corroborated PNC boundary." : `${currentBoundary}/${traces.length || 0} qualified paths have a complete current runtime boundary.`}</small>
+    </div>
+    <div class="ftp-orientation-outcome">
+      <span>Transaction outcome</span>
+      <strong>${ftpEscape(completionSummary)}</strong>
+      <small>Route qualification never substitutes for transfer completion evidence.</small>
+    </div>
+  </div>
+  <div class="ftp-orientation-facts">
+    <div><span>Qualified paths</span><strong>${traces.length.toLocaleString()}</strong></div>
+    <div><span>Current runtime boundary</span><strong>${currentBoundary}/${traces.length || 0}</strong></div>
+    <div><span>Needs mapping</span><strong>${gaps.length.toLocaleString()}</strong></div>
+    <div><span>FTP servers in estate</span><strong>${servers.length.toLocaleString()}</strong></div>
+  </div>`;
 }
 
 async function loadFtpOperator() {
@@ -124,13 +275,15 @@ async function loadFtpOperator() {
   if (!panel || ftpState.loading) return;
   const view = document.querySelector('[data-view-panel="routes"]');
   if (!view?.classList.contains("active")) return;
+
   ftpState.loading = true;
   const sequence = ++ftpState.sequence;
   panel.hidden = false;
-  const metrics = document.getElementById("ftpOperatorMetrics");
+  const orientation = document.getElementById("ftpOrientation");
   const routesNode = document.getElementById("ftpQualifiedRoutes");
   const gapsNode = document.getElementById("ftpMappingGaps");
-  if (metrics) metrics.innerHTML = `<div class="ftp-loading">Loading current FTP canonical state…</div>`;
+
+  if (orientation) orientation.innerHTML = `<div class="ftp-loading">Loading current FTP canonical state…</div>`;
   if (routesNode) routesNode.innerHTML = "";
   if (gapsNode) gapsNode.innerHTML = "";
 
@@ -147,6 +300,12 @@ async function loadFtpOperator() {
 
     const flowById = new Map(flows.map((item) => [String(item.entity_id), item]));
     const endpointById = new Map(endpoints.map((item) => [String(item.entity_id), item]));
+    const serverByKey = new Map();
+    servers.forEach((item) => {
+      const key = item.properties?.source_key || item.properties?.canonical_key || item.identity_key;
+      if (key) serverByKey.set(String(key), item);
+    });
+
     const ftpRelations = relations.filter((relation) => flowById.has(String(relation.source_entity_id)) && endpointById.has(String(relation.target_entity_id)));
     const traces = (await Promise.all(ftpRelations.map(async (relation) => {
       try {
@@ -154,35 +313,69 @@ async function loadFtpOperator() {
       } catch {
         return null;
       }
-    }))).filter((trace) => trace?.found && trace?.semantics?.route_domain === "file_transfer" && trace?.semantics?.qualified_route === true);
-    const corroborated = traces.filter((trace) => Array.isArray(trace.semantics?.runtime_corroboration) && trace.semantics.runtime_corroboration.length > 0).length;
-    const completionsObserved = traces.filter((trace) => trace.semantics?.transfer_completion === "observed").length;
-    const completionState = completionsObserved > 0 ? `${completionsObserved} observed` : traces.length ? "Not observed" : "Unknown";
+    })))
+      .filter((trace) => trace?.found && trace?.semantics?.route_domain === "file_transfer" && trace?.semantics?.qualified_route === true)
+      .sort((a, b) => String(a.source?.display_name || "").localeCompare(String(b.source?.display_name || "")));
+
+    const currentBoundary = traces.filter((trace) => {
+      const listenerCurrent = trace.semantics?.current_listener_evidence?.time_scope === "current";
+      const runtimeCurrent = Array.isArray(trace.semantics?.runtime_corroboration)
+        && trace.semantics.runtime_corroboration.some((item) => item?.time_scope === "current" && item?.independently_corroborated === true);
+      return listenerCurrent && runtimeCurrent;
+    }).length;
+
+    const observedCompletions = traces.filter((trace) => trace.semantics?.transfer_completion === "observed").length;
+    const unknownCompletions = traces.filter((trace) => !["observed", "not_observed"].includes(trace.semantics?.transfer_completion)).length;
+    const completionSummary = observedCompletions > 0
+      ? `${observedCompletions}/${traces.length} completed transfer${observedCompletions === 1 ? "" : "s"} observed`
+      : traces.length && unknownCompletions === 0
+        ? "No completed transfer observed"
+        : "Transfer completion evidence unknown";
 
     ftpState.loadedEstate = summary.estate?.estate_revision_id || null;
-    if (metrics) metrics.innerHTML = `
-      <div class="ftp-metric"><span>Qualified routes</span><strong>${traces.length.toLocaleString()}</strong><small>Inferred topology paths only</small></div>
-      <div class="ftp-metric"><span>FTP servers</span><strong>${servers.length.toLocaleString()}</strong><small>EFT and gateway canonical objects</small></div>
-      <div class="ftp-metric"><span>Current runtime boundary</span><strong>${corroborated}/${traces.length || 0}</strong><small>Routes with current corroboration</small></div>
-      <div class="ftp-metric"><span>Transfer completion</span><strong>${ftpEscape(completionState)}</strong><small>No completion is inferred from route qualification</small></div>
-      <div class="ftp-metric ${gaps.length ? "warn" : ""}"><span>Needs mapping</span><strong>${gaps.length.toLocaleString()}</strong><small>Explicit unresolved Site/listener relationships</small></div>`;
 
-    document.getElementById("ftpRouteCount").textContent = `${traces.length} route${traces.length === 1 ? "" : "s"}`;
-    document.getElementById("ftpGapCount").textContent = `${gaps.length} gap${gaps.length === 1 ? "" : "s"}`;
-    routesNode.innerHTML = traces.length ? traces.map(routeCard).join("") : `<div class="ftp-empty">No qualified FTP topology routes are present in the current canonical estate.</div>`;
-    gapsNode.innerHTML = gaps.length ? gaps.map((gap) => gapCard(gap, endpointById)).join("") : `<div class="ftp-empty">No unresolved FTP Site/listener mappings are present.</div>`;
+    if (orientation) {
+      orientation.innerHTML = orientationMarkup({
+        traces,
+        gaps,
+        currentBoundary,
+        completionSummary,
+        servers,
+      });
+    }
 
-    routesNode.querySelectorAll(".ftp-inspect-route").forEach((button) => {
+    const routeCount = document.getElementById("ftpRouteCount");
+    const gapCount = document.getElementById("ftpGapCount");
+    if (routeCount) routeCount.textContent = `${traces.length} path${traces.length === 1 ? "" : "s"}`;
+    if (gapCount) gapCount.textContent = `${gaps.length} gap${gaps.length === 1 ? "" : "s"}`;
+
+    if (routesNode) {
+      routesNode.innerHTML = traces.length
+        ? traces.map((trace) => routeCard(trace, serverByKey)).join("")
+        : `<div class="ftp-empty">No evidence-qualified FTP service paths are present in the current canonical estate.</div>`;
+    }
+
+    if (gapsNode) {
+      gapsNode.innerHTML = gaps.length
+        ? gaps.map((gap) => gapCard(gap, endpointById)).join("")
+        : `<div class="ftp-empty">No unresolved FTP Site/listener mappings are present.</div>`;
+    }
+
+    routesNode?.querySelectorAll(".ftp-inspect-route").forEach((button) => {
       button.addEventListener("click", async () => {
         if (typeof window.osiTraceCanonicalRoute !== "function") return;
         button.disabled = true;
-        try { await window.osiTraceCanonicalRoute(button.dataset.from, button.dataset.to); }
-        finally { button.disabled = false; }
+        try {
+          await window.osiTraceCanonicalRoute(button.dataset.from, button.dataset.to);
+          document.querySelector(".route-results-v2")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        } finally {
+          button.disabled = false;
+        }
       });
     });
   } catch (error) {
     if (sequence !== ftpState.sequence) return;
-    if (metrics) metrics.innerHTML = `<div class="ftp-error"><strong>FTP operator projection unavailable</strong><span>${ftpEscape(error.message)}</span></div>`;
+    if (orientation) orientation.innerHTML = `<div class="ftp-error"><strong>FTP service-path projection unavailable</strong><span>${ftpEscape(error.message)}</span></div>`;
     if (routesNode) routesNode.innerHTML = "";
     if (gapsNode) gapsNode.innerHTML = "";
   } finally {

@@ -33,7 +33,7 @@ The UI shows separately:
 4. current PNC runtime corroboration;
 5. transfer completion state.
 
-`runtime_transfer_completion=false` renders as **Not observed**. It is not converted to failed or successful transfer.
+`runtime_transfer_completion=false` renders as **No completed transfer observed**. It is not converted to failed or successful transfer.
 
 ### Mapping gaps are topology gaps, not incidents
 
@@ -43,11 +43,56 @@ Unresolved `filetransfer.endpoint` references are surfaced under **Needs mapping
 
 The FTP workspace contains no animated traffic indicator and no inferred health badge. Current runtime corroboration is shown only where it is present in the canonical route properties.
 
+## Operator experience
+
+The Routes experience follows a three-stage investigation model.
+
+### 1. Orient
+
+The operator first receives a compact service-path summary instead of a wall of estate metrics:
+
+- number of qualified FTP paths;
+- current runtime-boundary coverage;
+- explicit mapping gaps requiring attention;
+- transfer-completion evidence state;
+- file-transfer server count as secondary estate context.
+
+The summary uses operator language first while preserving exact epistemic terminology in route details.
+
+### 2. Understand
+
+Each qualified FTP route is rendered as an evidence-backed path lane:
+
+`Access context -> DMZ listener -> PNC boundary -> EFT Site`
+
+Each path component carries its own evidence state. The lane is explicitly a topology projection, not a live transaction timeline.
+
+For the accepted production routes:
+
+- Access context is historical observed evidence;
+- the DMZ listener is current observed evidence;
+- the PNC boundary is current and independently corroborated;
+- the EFT Site is the canonical topology destination;
+- the overall route remains qualified but inferred;
+- completed file transfer remains unobserved.
+
+The browser may resolve the canonical DMZ gateway display name from the route's `gateway_server_key`, but it does not infer downstream MFT-agent membership, storage dependencies, or transfer success from naming or geometry.
+
+### 3. Prove
+
+Every route retains **Inspect route evidence**. Selecting it focuses the existing canonical route workbench on the exact source and destination entities, where the operator can inspect the evidence-backed route claim without creating a second source of truth.
+
+A secondary disclosure, **Why is this path qualified?**, exposes the precise Site activity window, listener endpoint, PNC endpoint, runtime source kinds, and transfer-outcome state.
+
+## Readability contract
+
+The FTP service-path projection is an operations workspace, not a dense telemetry table. Primary route labels, evidence states, explanatory copy, and actions use normal readable UI sizes; evidence badges are no longer rendered at 7–8 px. Horizontal path lanes may scroll on constrained screens rather than shrinking evidence text below readable size.
+
 ## Implementation
 
 ### Route API
 
-`src/integrated-routes.ts` now handles explicitly qualified FTP direct routes in addition to the existing qualified DataPower-to-MQ projection.
+`src/integrated-routes.ts` handles explicitly qualified FTP direct routes in addition to the existing qualified DataPower-to-MQ projection.
 
 FTP trace responses expose:
 
@@ -69,24 +114,15 @@ The derived presentation state never upgrades the underlying evidence.
 
 ### Routes workspace
 
-`public/ftp-operator.js` adds an FTP operator projection above the existing canonical route workbench. It reads only the canonical estate APIs and derives no topology from screen geometry or naming heuristics.
+`public/ftp-operator.js` adds the FTP service-path projection above the existing canonical route workbench. It reads only the canonical estate APIs and derives no topology from screen geometry or display-name heuristics.
 
-The panel contains:
-
-- qualified-route count;
-- file-transfer server count;
-- current runtime-corroboration coverage for qualified routes;
-- transfer-completion observation state;
-- explicit mapping-gap count;
-- one card per qualified FTP route;
-- one card per unresolved FTP endpoint mapping;
-- an **Inspect route evidence** action that focuses the existing canonical route workbench on the exact route entities.
+`public/ftp-operator.css` provides responsive service-path lanes and readable evidence presentation while retaining the existing OSI visual system.
 
 All values are computed from the current estate; no production cardinality is hard-coded into the browser.
 
 ## Regression contract
 
-Canonical-route CI now verifies:
+Canonical-route CI verifies:
 
 - MQ route semantics remain unchanged;
 - qualified DataPower route semantics remain unchanged;
@@ -98,6 +134,8 @@ Canonical-route CI now verifies:
 - `runtime_transfer_completion=false` returns `transfer_completion=not_observed`;
 - unresolved FTP Site mapping remains visible through the canonical unresolved API.
 
+UI checks additionally continue to parse the FTP operator JavaScript and preserve canonical Routes shell invariants.
+
 ## Deferred product detail
 
-The first operator slice does not infer MFT-agent membership from display names and does not treat filesystem endpoints as NFS dependencies. A later FTP detail projection may expose MFT agents, storage paths, and queue-manager dependency chains once those views can be driven by canonical typed relations rather than UI-side heuristics.
+The service-path projection does not infer MFT-agent membership from display names and does not treat filesystem endpoints as NFS dependencies. A later route extension may expose MFT agents, storage paths, and queue-manager dependency chains only when those segments can be driven by canonical typed relations rather than UI-side heuristics.

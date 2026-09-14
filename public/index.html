@@ -7,7 +7,7 @@
   <title>MW Dashboard · Operational Intelligence</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/routes-v2.css" />
-  <link rel="stylesheet" href="/ftp-operator.css?v=20260914-1" />
+  <link rel="stylesheet" href="/ftp-operator.css?v=20260915-1" />
   <link rel="stylesheet" href="/readability.css" />
   <link rel="stylesheet" href="/estate-ui.css" />
   <link rel="stylesheet" href="/operations-terminal.css" />
@@ -108,9 +108,9 @@
         <section class="route-workbench panel">
           <div class="route-workbench-head">
             <div>
-              <p class="section-kicker">Canonical route trace</p>
-              <h2>What path can the current evidence support?</h2>
-              <p>Select canonical endpoints to inspect MQ, ACE, DataPower or file-transfer delivery semantics. Route qualification, runtime access, historical activity and transaction outcomes remain separate evidence claims.</p>
+              <p class="section-kicker">Service-path investigation</p>
+              <h2>Follow the path, then prove each claim</h2>
+              <p>Choose exact canonical endpoints or start from an evidence-qualified service path above. OSI keeps topology, runtime access, historical activity, unresolved gaps and transaction outcomes as separate claims.</p>
             </div>
             <span class="route-mode-badge"><i></i>Canonical · evidence-aware</span>
           </div>
@@ -132,12 +132,12 @@
             <datalist id="routeObjects" hidden></datalist>
           </form>
           <div class="route-help">
-            <div class="route-help-copy"><strong>How to read the result:</strong> each segment retains its own evidence class and time scope. MQ handle access is not PUT/GET activity; an evidence-qualified FTP topology path is not proof of a completed file transfer.</div>
+            <div class="route-help-copy"><strong>How to read the result:</strong> read left to right as the strongest supported topology path, not a live transaction trace. Each segment retains its own evidence class and time scope; MQ handle access is not PUT/GET activity, and an evidence-qualified FTP path is not proof of completed file transfer.</div>
             <div id="routeSuggestions" class="route-quick"><span>Open Routes to load canonical route evidence…</span></div>
           </div>
         </section>
         <section class="panel route-results-v2">
-          <div class="section-heading compact-heading"><div><p class="section-kicker">Evidence journey</p><h2 id="routeTitle">No route selected</h2></div><span id="routeMeta"></span></div>
+          <div class="section-heading compact-heading"><div><p class="section-kicker">Prove</p><h2 id="routeTitle">No route selected</h2></div><span id="routeMeta"></span></div>
           <div id="routeResult" class="route-empty">Choose a source and destination. We will show the strongest supported semantic route, evidence quality, technology-specific details and explicit gaps without inventing missing observations.</div>
         </section>
       </section>
