@@ -6,7 +6,11 @@ on:
       - "src/bootstrap.ts"
       - "src/integrated-routes.ts"
       - "src/semantic-routes.ts"
+      - "public/index.html"
       - "public/routes-estate.js"
+      - "public/routes-v2.css"
+      - "public/ftp-operator.js"
+      - "public/ftp-operator.css"
       - "public/shell.js"
       - "scripts/normalize-integrated-evidence.mjs"
       - "scripts/publish-observation-bundle.mjs"
@@ -24,7 +28,11 @@ on:
       - "src/bootstrap.ts"
       - "src/integrated-routes.ts"
       - "src/semantic-routes.ts"
+      - "public/index.html"
       - "public/routes-estate.js"
+      - "public/routes-v2.css"
+      - "public/ftp-operator.js"
+      - "public/ftp-operator.css"
       - "public/shell.js"
       - "scripts/normalize-integrated-evidence.mjs"
       - "scripts/publish-observation-bundle.mjs"
@@ -55,6 +63,7 @@ jobs:
       - name: JavaScript syntax
         run: |
           node --check public/routes-estate.js
+          node --check public/ftp-operator.js
           node --check public/shell.js
           node --check scripts/normalize-integrated-evidence.mjs
           node --check scripts/publish-observation-bundle.mjs
@@ -133,6 +142,7 @@ jobs:
           assert data['mode'] == 'configured_semantic_path'
           assert data['semantics']['configured_route_is_runtime_traversal'] is False
           assert data['semantics']['qualified_route'] is True
+          assert data['semantics']['route_domain'] == 'messaging'
           assert data['semantics']['derived_epistemic'] == 'derived'
           assert len(data['steps']) == 1
           step=data['steps'][0]
@@ -145,6 +155,49 @@ jobs:
           assert len(data['semantics']['runtime_corroboration']) == 1
           assert step.get('semantic_warning')
           print('Qualified DataPower route semantics OK')
+          PY
+
+          ftp_search="$(curl --fail --silent "$base/search?q=External%20User")"
+          printf '%s\n' "$ftp_search" | grep -Fq '"semantic_type": "filetransfer.endpoint"'
+          printf '%s\n' "$ftp_search" | grep -Fq '"semantic_type": "filetransfer.flow"'
+
+          ftp_trace="$(curl --fail --silent "$base/trace?from=ftp-flow&to=ftp-site&max_depth=12")"
+          printf '%s\n' "$ftp_trace" > /tmp/ftp-trace.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/ftp-trace.json'))
+          assert data['found'] is True
+          assert data['mode'] == 'configured_semantic_path'
+          semantics=data['semantics']
+          assert semantics['configured_route_is_runtime_traversal'] is False
+          assert semantics['qualified_route'] is True
+          assert semantics['route_domain'] == 'file_transfer'
+          assert semantics['derived_epistemic'] == 'inferred'
+          assert semantics['runtime_transfer_completion'] is False
+          assert semantics['transfer_completion'] == 'not_observed'
+          assert semantics['site_access_evidence']['time_scope'] == 'historical'
+          assert semantics['current_listener_evidence']['time_scope'] == 'current'
+          assert len(semantics['runtime_corroboration']) == 1
+          assert semantics['runtime_corroboration'][0]['independently_corroborated'] is True
+          step=data['steps'][0]
+          assert step['semantic_type'] == 'integration.routes_to'
+          assert step['label'] == 'Qualified topology path'
+          assert step['evidence_classes'] == ['inferred']
+          assert step['properties']['qualified_route'] is True
+          assert step['properties']['runtime_transfer_completion'] is False
+          assert step.get('semantic_warning')
+          print('Qualified FTP topology-route semantics OK')
+          PY
+
+          ftp_gaps="$(curl --fail --silent 'http://127.0.0.1:8787/api/v2/estate/current/unresolved?semantic_type=filetransfer.endpoint&limit=100')"
+          printf '%s\n' "$ftp_gaps" > /tmp/ftp-gaps.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/ftp-gaps.json'))
+          gaps=data['unresolved']
+          assert any(x['source_entity_id'] == 'ftp-unresolved-site' and x['state'] == 'unresolved' for x in gaps)
+          assert any('no listener mapping' in x['reason'] for x in gaps)
+          print('FTP mapping-gap semantics OK')
           PY
 
           missing="$(curl --fail --silent "$base/trace?from=q-xmit&to=app-consumer")"
