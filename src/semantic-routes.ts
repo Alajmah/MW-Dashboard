@@ -12,6 +12,7 @@ const SEARCH_TYPES = [
   "ace.message_flow",
   "datapower.service",
   "filetransfer.flow",
+  "filetransfer.endpoint",
 ] as const;
 
 const FORWARD_DELIVERY = [
