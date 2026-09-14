@@ -86,7 +86,7 @@
       "name": "External User",
       "server_key": "eft:EFT01",
       "status": "started",
-      "listener_resolution": "resolved",
+      "listener_resolution": "qualified-inferred",
       "runtime_sample": { "sessions_min": 3, "sessions_max": 4, "uploads_min": 0, "uploads_max": 1, "downloads_min": 0, "downloads_max": 0 },
       "historical_context": { "event_rule_activity_seen": true },
       "time_scope": "current",
@@ -98,7 +98,7 @@
       "name": "External-Public",
       "server_key": "eft:EFT01",
       "status": "started",
-      "listener_resolution": "resolved",
+      "listener_resolution": "qualified-inferred",
       "runtime_sample": { "sessions_min": 0, "sessions_max": 0 },
       "historical_context": { "event_rule_activity_seen": true },
       "time_scope": "current",
@@ -110,7 +110,7 @@
       "name": "Public-Internet",
       "server_key": "eft:EFT01",
       "status": "started",
-      "listener_resolution": "resolved",
+      "listener_resolution": "qualified-inferred",
       "runtime_sample": { "sessions_min": 1, "sessions_max": 1, "uploads_min": 1, "uploads_max": 2, "downloads_min": 0, "downloads_max": 1 },
       "historical_context": { "event_rule_activity_seen": true },
       "time_scope": "current",
@@ -148,48 +148,93 @@
       "name": "External User inbound",
       "site_key": "site-external-user",
       "gateway_server_key": "dmzgateway:DMZ01",
-      "listener": { "host": "192.0.2.20", "port": 22 },
-      "pnc": { "host": "192.0.2.20", "port": 44500, "independently_corroborated": true, "evidence_ref": "ev:pnc-a1" },
-      "granted_access_records": 120,
-      "denied_access_records": 0,
-      "activity_window_start": "2026-09-14 08:00:00",
-      "activity_window_end": "2026-09-14 09:00:00",
-      "status": "active",
-      "time_scope": "current",
-      "evidence_class": "observed",
-      "evidence_ref": "ev:route-external-user"
+      "listener": {
+        "host": "192.0.2.20",
+        "port": 22,
+        "time_scope": "current",
+        "evidence_class": "observed",
+        "evidence_ref": "ev:listener-external-user"
+      },
+      "site_access": {
+        "time_scope": "historical",
+        "evidence_class": "observed",
+        "evidence_ref": "ev:site-access-external-user",
+        "granted_access_records": 120,
+        "denied_access_records": 0,
+        "activity_window_start": "2026-09-14T08:00:00Z",
+        "activity_window_end": "2026-09-14T09:00:00Z"
+      },
+      "pnc": {
+        "host": "192.0.2.20",
+        "port": 44500,
+        "time_scope": "current",
+        "evidence_class": "observed",
+        "independently_corroborated": true,
+        "evidence_ref": "ev:pnc-a1"
+      },
+      "status": "qualified"
     },
     {
       "key": "ftp-route-external-public",
       "name": "External-Public inbound",
       "site_key": "site-external-public",
       "gateway_server_key": "dmzgateway:DMZ01",
-      "listener": { "host": "192.0.2.21", "port": 4446 },
-      "pnc": { "host": "192.0.2.21", "port": 44501, "independently_corroborated": true, "evidence_ref": "ev:pnc-a2" },
-      "granted_access_records": 18,
-      "denied_access_records": 2,
-      "activity_window_start": "2026-09-14 08:00:00",
-      "activity_window_end": "2026-09-14 09:00:00",
-      "status": "active",
-      "time_scope": "current",
-      "evidence_class": "observed",
-      "evidence_ref": "ev:route-external-public"
+      "listener": {
+        "host": "192.0.2.21",
+        "port": 4446,
+        "time_scope": "current",
+        "evidence_class": "observed",
+        "evidence_ref": "ev:listener-external-public"
+      },
+      "site_access": {
+        "time_scope": "historical",
+        "evidence_class": "observed",
+        "evidence_ref": "ev:site-access-external-public",
+        "granted_access_records": 18,
+        "denied_access_records": 2,
+        "activity_window_start": "2026-09-14T08:00:00Z",
+        "activity_window_end": "2026-09-14T09:00:00Z"
+      },
+      "pnc": {
+        "host": "192.0.2.21",
+        "port": 44501,
+        "time_scope": "current",
+        "evidence_class": "observed",
+        "independently_corroborated": true,
+        "evidence_ref": "ev:pnc-a2"
+      },
+      "status": "qualified"
     },
     {
       "key": "ftp-route-public-internet",
       "name": "Public-Internet inbound",
       "site_key": "site-public-internet",
       "gateway_server_key": "dmzgateway:DMZ02",
-      "listener": { "host": "192.0.2.30", "port": 3476 },
-      "pnc": { "host": "192.0.2.30", "port": 44502, "independently_corroborated": true, "evidence_ref": "ev:pnc-b1" },
-      "granted_access_records": 90,
-      "denied_access_records": 11,
-      "activity_window_start": "2026-09-14 08:00:00",
-      "activity_window_end": "2026-09-14 09:00:00",
-      "status": "active",
-      "time_scope": "current",
-      "evidence_class": "observed",
-      "evidence_ref": "ev:route-public-internet"
+      "listener": {
+        "host": "192.0.2.30",
+        "port": 3476,
+        "time_scope": "current",
+        "evidence_class": "observed",
+        "evidence_ref": "ev:listener-public-internet"
+      },
+      "site_access": {
+        "time_scope": "historical",
+        "evidence_class": "observed",
+        "evidence_ref": "ev:site-access-public-internet",
+        "granted_access_records": 90,
+        "denied_access_records": 11,
+        "activity_window_start": "2026-09-14T08:00:00Z",
+        "activity_window_end": "2026-09-14T09:00:00Z"
+      },
+      "pnc": {
+        "host": "192.0.2.30",
+        "port": 44502,
+        "time_scope": "current",
+        "evidence_class": "observed",
+        "independently_corroborated": true,
+        "evidence_ref": "ev:pnc-b1"
+      },
+      "status": "qualified"
     }
   ],
   "storage_paths": [
@@ -247,8 +292,22 @@
     }
   ],
   "gaps": [
-    { "key": "external-ftps-listener", "state": "unknown", "reason": "current Site exists and historical activity is present, but no listener/gateway mapping is supported by current evidence" },
-    { "key": "internal-user-listener", "state": "unknown", "reason": "current Site exists but no listener mapping is supported by current evidence" },
-    { "key": "storage-nfs-mapping", "state": "unknown", "reason": "local NTFS path must not be equated with a remote NFS export without independent evidence" }
+    {
+      "key": "external-ftps-listener",
+      "site_key": "site-external-ftps",
+      "state": "unknown",
+      "reason": "current Site exists and historical activity is present, but no current listener/gateway mapping is supported by the supplied evidence"
+    },
+    {
+      "key": "internal-user-listener",
+      "site_key": "site-internal-user",
+      "state": "unknown",
+      "reason": "current Site exists but no listener mapping is supported by the supplied evidence"
+    },
+    {
+      "key": "storage-nfs-mapping",
+      "state": "unknown",
+      "reason": "local NTFS path must not be equated with a remote NFS export without independent evidence"
+    }
   ]
 }
