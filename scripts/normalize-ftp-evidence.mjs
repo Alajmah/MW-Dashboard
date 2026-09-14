@@ -14,6 +14,7 @@ function fail(message) { throw new Error(message); }
 function sha256(value) { return createHash('sha256').update(value).digest('hex'); }
 function stableRef(prefix, ...parts) { return `${prefix}_${sha256(parts.join('|')).slice(0, 20)}`; }
 function cleanObject(value) { return Object.fromEntries(Object.entries(value ?? {}).filter(([, v]) => v !== null && v !== undefined && v !== '')); }
+function uniqStrings(values) { return [...new Set((values ?? []).filter(v => typeof v === 'string' && v.trim()).map(v => v.trim()))]; }
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -43,6 +44,7 @@ class Builder {
   }
   entity(semanticType, hints, displayName, observedAt, evidenceClass, { evidenceRef=null, status=null, properties={} }={}) {
     const cleanHints = cleanObject(hints);
+    const normalizedProperties = canonicalize(properties);
     const key = stableStringify([semanticType, cleanHints, evidenceClass, evidenceRef]);
     if (this.entityByKey.has(key)) return this.entityByKey.get(key);
     const ref = stableRef('ent', key);
@@ -53,7 +55,7 @@ class Builder {
       display_name: displayName,
       observed_at: observedAt,
       evidence_class: evidenceClass,
-      properties,
+      properties: normalizedProperties,
     };
     if (status) item.status = status;
     if (evidenceRef) item.evidence_ref = evidenceRef;
@@ -64,7 +66,8 @@ class Builder {
   }
   relation(semanticType, sourceRef, targetRef, observedAt, evidenceClass, { evidenceRef=null, properties={} }={}) {
     if (!this.entityType.has(sourceRef) || !this.entityType.has(targetRef)) fail(`relation endpoint missing: ${semanticType}`);
-    const ref = stableRef('rel', semanticType, sourceRef, targetRef, evidenceClass, evidenceRef ?? '');
+    const normalizedProperties = canonicalize(properties);
+    const ref = stableRef('rel', semanticType, sourceRef, targetRef, evidenceClass, evidenceRef ?? '', stableStringify(normalizedProperties));
     const item = {
       ref,
       semantic_type: semanticType,
@@ -72,7 +75,7 @@ class Builder {
       target_ref: targetRef,
       observed_at: observedAt,
       evidence_class: evidenceClass,
-      properties,
+      properties: normalizedProperties,
     };
     if (evidenceRef) item.evidence_ref = evidenceRef;
     this.bundle.relations.push(item);
@@ -80,14 +83,15 @@ class Builder {
   }
   unresolved(sourceRef, semanticType, state, evidenceClass, properties={}) {
     if (!this.entityType.has(sourceRef)) fail(`unresolved source endpoint missing: ${semanticType}`);
-    const ref = stableRef('unr', sourceRef, semanticType, state, stableStringify(properties));
+    const normalizedProperties = canonicalize(properties);
+    const ref = stableRef('unr', sourceRef, semanticType, state, stableStringify(normalizedProperties));
     this.bundle.unresolved_references.push({
       ref,
       source_ref: sourceRef,
       semantic_type: semanticType,
       state,
       evidence_class: evidenceClass,
-      properties,
+      properties: normalizedProperties,
     });
     return ref;
   }
@@ -98,7 +102,7 @@ class Builder {
       scope_key: this.bundle.run.source.id,
       object_class: objectClass,
       mode,
-      properties,
+      properties: canonicalize(properties),
     };
     if (evidenceRef) item.evidence_ref = evidenceRef;
     this.bundle.coverage.push(item);
@@ -259,9 +263,9 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
         server_key: site.server_key,
         site_name: site.name,
         site_started: site.status !== 'stopped',
-        runtime_sample: site.runtime_sample ?? {},
+        runtime_sample: canonicalize(site.runtime_sample ?? {}),
         listener_resolution: site.listener_resolution ?? 'unresolved',
-        historical_context: site.historical_context ?? {},
+        historical_context: canonicalize(site.historical_context ?? {}),
       },
     });
     siteRefs.set(site.key, ref);
@@ -328,6 +332,10 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
     if (!route.pnc?.host) fail(`route ${route.key} PNC host is required`);
     requirePort(route.pnc?.port, `route ${route.key} PNC port`);
     if (route.pnc.independently_corroborated !== true) fail(`route ${route.key} requires independently corroborated PNC connectivity`);
+    const pncCorroborationRefs = uniqStrings(route.pnc.corroboration_evidence_refs);
+    if (pncCorroborationRefs.length < 2) fail(`route ${route.key} PNC requires at least two distinct corroboration_evidence_refs`);
+    if (!pncCorroborationRefs.includes(pncEvidenceRef)) fail(`route ${route.key} PNC evidence_ref must be included in corroboration_evidence_refs`);
+    if (pncCorroborationRefs.includes(siteAccessEvidenceRef)) fail(`route ${route.key} PNC corroboration must be independent of Site-access evidence`);
 
     const listener = ensureGatewayEndpoint({
       serverKey: route.gateway_server_key,
@@ -346,12 +354,12 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
       evidenceRef: pncEvidenceRef,
     });
 
-    const evidenceRefs = [
+    const evidenceRefs = uniqStrings([
       listenerEvidenceRef,
       siteAccessEvidenceRef,
-      pncEvidenceRef,
+      ...pncCorroborationRefs,
       site.evidence_ref,
-    ];
+    ]).sort();
     const flowRef = b.entity('filetransfer.flow', {
       canonical_key: route.key,
       name: route.name,
@@ -403,6 +411,7 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
           endpoint: `${route.pnc.host}:${route.pnc.port}`,
           independently_corroborated: true,
           evidence_ref: pncEvidenceRef,
+          evidence_refs: [...pncCorroborationRefs].sort(),
         }],
         current_listener_evidence: {
           time_scope: 'current',
@@ -425,6 +434,7 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
       properties: {
         flow_kind: 'eft_dmz_pnc',
         target_gateway_server_key: route.gateway_server_key,
+        evidence_refs: [...pncCorroborationRefs].sort(),
         runtime_transfer_completion: false,
       },
     });
@@ -433,6 +443,7 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
       properties: {
         role: 'peer_notification_channel',
         independently_corroborated: true,
+        evidence_refs: [...pncCorroborationRefs].sort(),
         runtime_transfer_completion: false,
       },
     });
@@ -508,7 +519,9 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
     mftAgentRefs.push(appRef);
   }
 
-  const unresolvedSites = sites.filter(site => !resolvedSiteKeys.has(site.key));
+  const unresolvedSites = sites
+    .filter(site => !resolvedSiteKeys.has(site.key))
+    .sort((a,b)=>String(a.key).localeCompare(String(b.key)));
   for (const site of unresolvedSites) {
     const siteRef = siteRefs.get(site.key);
     b.unresolved(siteRef, 'filetransfer.endpoint', 'unresolved', 'observed', {
@@ -541,7 +554,7 @@ export function normalizeProjection(input, { sourceId=null, environment=null }={
     nfs_inference_forbidden: true,
   });
   if (gaps.length) b.coverage('filetransfer.coverage_gap', 'partial', {
-    gaps: gaps.map(g=>({ key:g.key, state:g.state ?? 'unknown', reason:g.reason })),
+    gaps: sortByKey(gaps).map(g=>({ key:g.key, state:g.state ?? 'unknown', reason:g.reason })),
   });
 
   const bundle = b.finish();
@@ -562,6 +575,8 @@ export function validateBundle(bundle) {
   ]);
   const refs = new Map(bundle.entities.map(entity=>[entity.ref,entity]));
   if (refs.size !== bundle.entities.length) fail('duplicate entity refs');
+  const relationRefs = new Set(bundle.relations.map(relation=>relation.ref));
+  if (relationRefs.size !== bundle.relations.length) fail('duplicate relation refs');
   for (const coverage of bundle.coverage) {
     if (!IMPORT_COVERAGE_MODES.has(coverage.mode)) fail(`unsupported coverage mode ${coverage.mode}`);
   }
@@ -591,6 +606,9 @@ export function validateBundle(bundle) {
       if (corroboration?.time_scope !== 'current' || corroboration?.evidence_class !== 'observed' || corroboration?.independently_corroborated !== true) {
         fail('FTP PNC corroboration must remain current observed independently corroborated evidence');
       }
+      const corroborationRefs = uniqStrings(corroboration?.evidence_refs);
+      if (corroborationRefs.length < 2) fail('FTP PNC corroboration requires at least two distinct evidence refs');
+      if (corroborationRefs.includes(relation.properties?.site_access_evidence?.evidence_ref)) fail('FTP PNC corroboration must remain independent of Site-access evidence');
       if (relation.properties?.current_listener_evidence?.time_scope !== 'current' || relation.properties?.current_listener_evidence?.evidence_class !== 'observed') {
         fail('FTP listener component must remain current observed evidence');
       }
