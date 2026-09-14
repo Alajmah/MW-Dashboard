@@ -18,6 +18,22 @@ async function ftpApi(path) {
   return body;
 }
 
+async function ftpPaged(path, collectionKey) {
+  const items = [];
+  let offset = 0;
+  for (let page = 0; page < 50; page += 1) {
+    const separator = path.includes("?") ? "&" : "?";
+    const data = await ftpApi(`${path}${separator}limit=100&offset=${offset}`);
+    items.push(...(Array.isArray(data[collectionKey]) ? data[collectionKey] : []));
+    const next = data.page?.next_offset;
+    if (next === null || next === undefined) return items;
+    const parsed = Number(next);
+    if (!Number.isFinite(parsed) || parsed <= offset) throw new Error(`Invalid canonical estate pagination for ${collectionKey}`);
+    offset = parsed;
+  }
+  throw new Error(`Canonical estate pagination exceeded safety limit for ${collectionKey}`);
+}
+
 function ensureFtpPanel() {
   const routesView = document.querySelector('[data-view-panel="routes"]');
   const workbench = routesView?.querySelector(".route-workbench");
@@ -119,22 +135,19 @@ async function loadFtpOperator() {
   if (gapsNode) gapsNode.innerHTML = "";
 
   try {
-    const [summary, flowsData, endpointsData, serversData, relationsData, gapsData] = await Promise.all([
+    const [summary, flows, endpoints, servers, relations, gaps] = await Promise.all([
       ftpApi("/api/v2/estate/current/summary"),
-      ftpApi("/api/v2/estate/current/entities?semantic_type=filetransfer.flow&limit=100"),
-      ftpApi("/api/v2/estate/current/entities?semantic_type=filetransfer.endpoint&limit=100"),
-      ftpApi("/api/v2/estate/current/entities?semantic_type=filetransfer.server&limit=100"),
-      ftpApi("/api/v2/estate/current/relations?semantic_type=integration.routes_to&limit=100"),
-      ftpApi("/api/v2/estate/current/unresolved?semantic_type=filetransfer.endpoint&limit=100"),
+      ftpPaged("/api/v2/estate/current/entities?semantic_type=filetransfer.flow", "entities"),
+      ftpPaged("/api/v2/estate/current/entities?semantic_type=filetransfer.endpoint", "entities"),
+      ftpPaged("/api/v2/estate/current/entities?semantic_type=filetransfer.server", "entities"),
+      ftpPaged("/api/v2/estate/current/relations?semantic_type=integration.routes_to", "relations"),
+      ftpPaged("/api/v2/estate/current/unresolved?semantic_type=filetransfer.endpoint", "unresolved"),
     ]);
     if (sequence !== ftpState.sequence) return;
 
-    const flows = flowsData.entities || [];
-    const endpoints = endpointsData.entities || [];
-    const servers = serversData.entities || [];
     const flowById = new Map(flows.map((item) => [String(item.entity_id), item]));
     const endpointById = new Map(endpoints.map((item) => [String(item.entity_id), item]));
-    const ftpRelations = (relationsData.relations || []).filter((relation) => flowById.has(String(relation.source_entity_id)) && endpointById.has(String(relation.target_entity_id)));
+    const ftpRelations = relations.filter((relation) => flowById.has(String(relation.source_entity_id)) && endpointById.has(String(relation.target_entity_id)));
     const traces = (await Promise.all(ftpRelations.map(async (relation) => {
       try {
         return await ftpApi(`/api/v2/routes/trace?from=${encodeURIComponent(relation.source_entity_id)}&to=${encodeURIComponent(relation.target_entity_id)}`);
@@ -142,7 +155,6 @@ async function loadFtpOperator() {
         return null;
       }
     }))).filter((trace) => trace?.found && trace?.semantics?.route_domain === "file_transfer" && trace?.semantics?.qualified_route === true);
-    const gaps = gapsData.unresolved || [];
     const corroborated = traces.filter((trace) => Array.isArray(trace.semantics?.runtime_corroboration) && trace.semantics.runtime_corroboration.length > 0).length;
     const completionsObserved = traces.filter((trace) => trace.semantics?.transfer_completion === "observed").length;
     const completionState = completionsObserved > 0 ? `${completionsObserved} observed` : traces.length ? "Not observed" : "Unknown";
