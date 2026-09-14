@@ -2,6 +2,7 @@ const ftState = { loading: false, loaded: false, data: null, error: null };
 const fq = (id) => document.getElementById(id);
 const fesc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 const fnatural = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+const REVISION_CHANGED = "ESTATE_REVISION_CHANGED";
 
 async function ftApi(path) {
   const response = await fetch(path, { headers: { accept: "application/json" } });
@@ -10,36 +11,53 @@ async function ftApi(path) {
   if (!response.ok) {
     const error = new Error(body.detail || `File-transfer query failed (${response.status})`);
     error.code = body.code;
+    error.status = response.status;
     throw error;
   }
   return body;
 }
 
-async function fetchAll(path, key) {
+function requireEstateRevision(body, expectedRevision = null, label = "canonical estate response") {
+  const revision = body?.estate?.estate_revision_id;
+  if (typeof revision !== "string" || !revision) {
+    const error = new Error(`${label} did not identify its canonical estate revision`);
+    error.code = REVISION_CHANGED;
+    throw error;
+  }
+  if (expectedRevision && revision !== expectedRevision) {
+    const error = new Error(`Canonical estate changed during File Transfer load (${expectedRevision} → ${revision})`);
+    error.code = REVISION_CHANGED;
+    throw error;
+  }
+  return revision;
+}
+
+async function fetchAll(path, key, revisionId) {
   const items = [];
   let offset = 0;
   while (offset != null) {
     const join = path.includes("?") ? "&" : "?";
     const page = await ftApi(`${path}${join}limit=100&offset=${offset}`);
+    requireEstateRevision(page, revisionId, `${key} page`);
     items.push(...(page[key] || []));
     offset = page.page?.next_offset ?? page.next_offset ?? null;
   }
   return items;
 }
 
-async function fetchEntities(type, query = "") {
+async function fetchEntities(type, revisionId) {
   const params = new URLSearchParams({ semantic_type: type });
-  if (query) params.set("q", query);
-  return fetchAll(`/api/v2/estate/current/entities?${params}`, "entities");
+  return fetchAll(`/api/v2/estate/current/entities?${params}`, "entities", revisionId);
 }
 
-async function fetchRelations(type) {
-  return fetchAll(`/api/v2/estate/current/relations?semantic_type=${encodeURIComponent(type)}`, "relations");
+async function fetchRelations(type, revisionId) {
+  return fetchAll(`/api/v2/estate/current/relations?semantic_type=${encodeURIComponent(type)}`, "relations", revisionId);
 }
 
-async function fetchDetails(items) {
+async function fetchDetails(items, revisionId) {
   const details = await Promise.all(items.map(async (item) => {
     const data = await ftApi(`/api/v2/estate/current/entities/${encodeURIComponent(item.entity_id)}?relation_limit=100`);
+    requireEstateRevision(data, revisionId, `entity detail ${item.entity_id}`);
     return data.entity;
   }));
   return details.filter(Boolean);
@@ -49,7 +67,7 @@ function ensureFileTransferScaffold() {
   if (!document.querySelector('link[data-osi-filetransfer-css]')) {
     const link = document.createElement("link");
     link.rel = "stylesheet";
-    link.href = "/filetransfer-view.css?v=20260914-1";
+    link.href = "/filetransfer-view.css?v=20260914-2";
     link.dataset.osiFiletransferCss = "true";
     document.head.appendChild(link);
   }
@@ -113,7 +131,11 @@ function ensureFileTransferScaffold() {
     routesView?.parentElement?.insertBefore(section, routesView);
   }
 
-  fq("ftRefresh")?.addEventListener("click", () => renderFileTransfer({ force: true }));
+  const refresh = fq("ftRefresh");
+  if (refresh && refresh.dataset.bound !== "true") {
+    refresh.dataset.bound = "true";
+    refresh.addEventListener("click", () => renderFileTransfer({ force: true }));
+  }
 }
 
 function evidenceChips(values) {
@@ -129,45 +151,76 @@ function serverBySourceKey(servers, key) {
   return servers.find((server) => property(server, "source_key") === key) || null;
 }
 
-async function loadFileTransferData() {
-  const [summary, serverRows, endpointRows, flowRows, mftRows, routeRelations, connectRelations, unresolvedPage] = await Promise.all([
-    ftApi("/api/v2/estate/current/summary"),
-    fetchEntities("filetransfer.server"),
-    fetchEntities("filetransfer.endpoint"),
-    fetchEntities("filetransfer.flow"),
-    fetchEntities("app.application_instance", "AGENT"),
-    fetchRelations("integration.routes_to"),
-    fetchRelations("network.connects_to"),
-    ftApi("/api/v2/estate/current/unresolved?semantic_type=filetransfer.endpoint&limit=100&offset=0"),
+function siteStateLabel(site) {
+  const state = property(site, "site_started", null);
+  if (state === true) return "Site started";
+  if (state === false) return "Site stopped";
+  return "Site state unknown";
+}
+
+async function loadFileTransferDataOnce() {
+  const summary = await ftApi("/api/v2/estate/current/summary");
+  const revisionId = requireEstateRevision(summary, null, "estate summary");
+
+  const [serverRows, endpointRows, flowRows, applicationRows, routeRelations, connectRelations, allUnresolved] = await Promise.all([
+    fetchEntities("filetransfer.server", revisionId),
+    fetchEntities("filetransfer.endpoint", revisionId),
+    fetchEntities("filetransfer.flow", revisionId),
+    fetchEntities("app.application_instance", revisionId),
+    fetchRelations("integration.routes_to", revisionId),
+    fetchRelations("network.connects_to", revisionId),
+    fetchAll("/api/v2/estate/current/unresolved?semantic_type=filetransfer.endpoint", "unresolved", revisionId),
   ]);
 
-  const [servers, endpoints, flows, mftCandidates] = await Promise.all([
-    fetchDetails(serverRows),
-    fetchDetails(endpointRows),
-    fetchDetails(flowRows),
-    fetchDetails(mftRows),
+  const [servers, endpoints, flows, applicationInstances] = await Promise.all([
+    fetchDetails(serverRows, revisionId),
+    fetchDetails(endpointRows, revisionId),
+    fetchDetails(flowRows, revisionId),
+    fetchDetails(applicationRows, revisionId),
   ]);
-  const mftAgents = mftCandidates.filter((item) => property(item, "component_class") === "ibm_mq_mft_agent");
+  const mftAgents = applicationInstances.filter((item) => property(item, "component_class") === "ibm_mq_mft_agent");
 
   const entityById = new Map([...servers, ...endpoints, ...flows, ...mftAgents].map((item) => [item.entity_id, item]));
+  const pncFlowIds = new Set(flows.filter((flow) => property(flow, "flow_kind") === "eft_dmz_pnc").map((flow) => flow.entity_id));
   const pncTargetIds = connectRelations
-    .filter((rel) => flows.some((flow) => flow.entity_id === rel.source_entity_id && property(flow, "flow_kind") === "eft_dmz_pnc"))
+    .filter((rel) => pncFlowIds.has(rel.source_entity_id))
     .map((rel) => rel.target_entity_id)
     .filter((id, index, list) => list.indexOf(id) === index);
-  const pncTargets = await fetchDetails(pncTargetIds.map((entity_id) => ({ entity_id })));
+  const pncTargets = await fetchDetails(pncTargetIds.map((entity_id) => ({ entity_id })), revisionId);
   pncTargets.forEach((item) => entityById.set(item.entity_id, item));
 
+  const siteIds = new Set(endpoints.filter((item) => property(item, "endpoint_kind") === "eft_site").map((item) => item.entity_id));
+  const unresolved = allUnresolved.filter((item) => siteIds.has(item.source_entity_id));
+
+  const finalSummary = await ftApi("/api/v2/estate/current/summary");
+  requireEstateRevision(finalSummary, revisionId, "final estate summary");
+
   return {
-    summary,
+    summary: finalSummary,
+    revisionId,
     servers,
     endpoints,
     flows,
     mftAgents,
     routeRelations,
     connectRelations,
-    unresolved: unresolvedPage.unresolved || [],
+    unresolved,
     entityById,
   };
+}
+
+async function loadFileTransferData() {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await loadFileTransferDataOnce();
+    } catch (error) {
+      lastError = error;
+      const retryable = error?.code === REVISION_CHANGED || error?.code === "ESTATE_STALE";
+      if (!retryable || attempt === 3) throw error;
+    }
+  }
+  throw lastError || new Error("File Transfer canonical estate load failed");
 }
 
 function renderStats(data) {
@@ -210,7 +263,7 @@ function renderFabric(data) {
         <div class="ft-arrow">→</div>
         <div class="ft-step"><span>DMZ Gateway</span><strong>${fesc(gateway?.display_name || property(flow, "gateway_server_key") || "Unknown")}</strong><small>${fesc(property(gateway, "physical_host", "physical host unknown"))}</small></div>
         <div class="ft-arrow">→</div>
-        <div class="ft-step"><span>EFT Site</span><strong>${fesc(site.display_name)}</strong><small>${property(site, "site_started") === true ? "started" : "state unknown"}</small></div>
+        <div class="ft-step"><span>EFT Site</span><strong>${fesc(site.display_name)}</strong><small>${fesc(siteStateLabel(site))}</small></div>
         <div class="ft-arrow">→</div>
         <div class="ft-step"><span>EFT backend</span><strong>${fesc(eft?.display_name || "Globalscape EFT")}</strong><small>${fesc(property(eft, "physical_host", "placement unknown"))}</small></div>
       </div>
@@ -225,7 +278,7 @@ function renderSites(data) {
   fq("ftSites").innerHTML = sites.map((site) => {
     const gap = unresolvedBySource.get(site.entity_id);
     const qualified = property(site, "listener_resolution") === "qualified-inferred";
-    return `<div class="ft-row"><div class="ft-row-main"><strong>${fesc(site.display_name)}</strong><small>${property(site, "site_started") === true ? "Site started" : "Site state unknown"} · ${qualified ? "listener path qualified" : "listener unresolved"}</small></div><div class="ft-row-right"><span class="ft-chip ${gap ? "warn" : "good"}">${gap ? "unresolved" : "mapped"}</span>${evidenceChips(site.evidence_classes)}</div></div>`;
+    return `<div class="ft-row"><div class="ft-row-main"><strong>${fesc(site.display_name)}</strong><small>${fesc(siteStateLabel(site))} · ${qualified ? "listener path qualified" : "listener unresolved"}</small></div><div class="ft-row-right"><span class="ft-chip ${gap ? "warn" : "good"}">${gap ? "unresolved" : "mapped"}</span>${evidenceChips(site.evidence_classes)}</div></div>`;
   }).join("") || `<div class="route-empty">No EFT Sites are present.</div>`;
 }
 
@@ -243,7 +296,18 @@ function renderPnc(data) {
 
 function renderMft(data) {
   const agents = [...data.mftAgents].sort((a, b) => fnatural.compare(a.display_name || "", b.display_name || ""));
-  fq("ftMft").innerHTML = agents.map((agent) => `<div class="ft-row ft-row-stack"><div class="ft-row-main"><strong>${fesc(agent.display_name)}</strong><small>Runs on EFT host · completed MFT transfer not proven</small></div><div class="ft-dependency-line"><span>Agent QM</span><strong>${fesc(property(agent, "agent_queue_manager", "Unknown"))}</strong><b>→</b><span>Coordination QM</span><strong>${fesc(property(agent, "coordination_queue_manager", "Unknown"))}</strong></div><div class="ft-row-right">${evidenceChips(agent.evidence_classes)}<span class="ft-chip configured">configured MQ dependency</span></div></div>`).join("") || `<div class="route-empty">No IBM MQ MFT agent anchors are present.</div>`;
+  fq("ftMft").innerHTML = agents.map((agent) => {
+    const agentQm = property(agent, "agent_queue_manager", "Unknown");
+    const coordinationQm = property(agent, "coordination_queue_manager", "Unknown");
+    return `<div class="ft-row ft-row-stack">
+      <div class="ft-row-main"><strong>${fesc(agent.display_name)}</strong><small>Runs on EFT host · completed MFT transfer not proven</small></div>
+      <div class="ft-dependency-line" aria-label="Configured MFT queue-manager dependencies">
+        <div class="ft-dependency-branch"><span>MFT agent</span><strong>${fesc(agent.display_name)}</strong><b>→</b><span>Agent QM</span><strong>${fesc(agentQm)}</strong></div>
+        <div class="ft-dependency-branch"><span>MFT agent</span><strong>${fesc(agent.display_name)}</strong><b>→</b><span>Coordination QM</span><strong>${fesc(coordinationQm)}</strong></div>
+      </div>
+      <div class="ft-row-right">${evidenceChips(agent.evidence_classes)}<span class="ft-chip configured">configured MQ dependencies</span></div>
+    </div>`;
+  }).join("") || `<div class="route-empty">No IBM MQ MFT agent anchors are present.</div>`;
 }
 
 function renderStorage(data) {
@@ -268,6 +332,14 @@ function renderAll(data) {
   renderUnresolved(data);
 }
 
+function renderLoadError(error) {
+  const message = fesc(error?.message || "Canonical file-transfer topology is unavailable");
+  fq("ftStats").innerHTML = `<article class="stat ft-error-stat"><span>File Transfer</span><strong>Unavailable</strong><small>${message}</small></article>`;
+  fq("ftRouteCount").textContent = "Unavailable";
+  const errorPanel = `<div class="route-empty ft-error-state">${message}. No cached estate is being shown.</div>`;
+  ["ftFabric", "ftSites", "ftPnc", "ftMft", "ftStorage", "ftUnresolved"].forEach((id) => { if (fq(id)) fq(id).innerHTML = errorPanel; });
+}
+
 async function renderFileTransfer({ force = false } = {}) {
   ensureFileTransferScaffold();
   if (ftState.loading) return;
@@ -278,14 +350,16 @@ async function renderFileTransfer({ force = false } = {}) {
   ftState.loading = true;
   fq("ftFabric").innerHTML = `<div class="route-empty">Loading canonical file-transfer topology…</div>`;
   try {
-    ftState.data = await loadFileTransferData();
+    const data = await loadFileTransferData();
+    ftState.data = data;
     ftState.loaded = true;
     ftState.error = null;
-    renderAll(ftState.data);
+    renderAll(data);
   } catch (error) {
+    ftState.loaded = false;
+    ftState.data = null;
     ftState.error = error;
-    fq("ftFabric").innerHTML = `<div class="route-empty">${fesc(error.message)}</div>`;
-    ["ftSites", "ftPnc", "ftMft", "ftStorage", "ftUnresolved"].forEach((id) => { if (fq(id)) fq(id).innerHTML = ""; });
+    renderLoadError(error);
   } finally {
     ftState.loading = false;
   }
