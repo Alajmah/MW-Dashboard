@@ -1,0 +1,151 @@
+name: FTP final review hardening two
+
+on:
+  push:
+    branches:
+      - ftp-evidence-integration
+    paths:
+      - ".github/workflows/ftp-final-review-fix2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          ref: ftp-evidence-integration
+          fetch-depth: 0
+
+      - name: Apply review hardening
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          normalizer = Path('scripts/normalize-ftp-evidence.mjs')
+          text = normalizer.read_text()
+
+          def replace_once(old, new, label):
+              global text
+              if old not in text:
+                  raise SystemExit(f'missing normalizer patch target: {label}')
+              text = text.replace(old, new, 1)
+
+          replace_once("const ADAPTER_VERSION = '0.4.0';", "const ADAPTER_VERSION = '0.5.0';", 'adapter version')
+          replace_once(
+              "const IMPORT_COVERAGE_MODES = new Set(['complete', 'point_in_time', 'partial', 'failed', 'not_collected']);\n",
+              "const IMPORT_COVERAGE_MODES = new Set(['complete', 'point_in_time', 'partial', 'failed', 'not_collected']);\nconst PNC_RUNTIME_SOURCE_KINDS = new Set(['dmz_gateway_runtime', 'eft_runtime']);\n",
+              'PNC source vocabulary',
+          )
+          replace_once(
+              "    if (typeof reason !== 'string' || !reason.trim()) fail(`unresolved ${semanticType} reason is required`);\n    const normalizedReason = reason.trim();",
+              "    if (typeof reason !== 'string' || !reason.trim()) fail(`unresolved ${semanticType} reason is required`);\n    const normalizedReason = reason.trim();\n    if (normalizedReason.length > 500) fail(`unresolved ${semanticType} reason must not exceed 500 characters`);",
+              'unresolved reason length',
+          )
+          replace_once(
+              "function requireEvidence(item, label) {\n  if (typeof item?.evidence_ref !== 'string' || !item.evidence_ref.trim()) fail(`${label} evidence_ref is required`);\n  return item.evidence_ref.trim();\n}\nfunction requireCurrentObserved",
+              "function requireEvidence(item, label) {\n  if (typeof item?.evidence_ref !== 'string' || !item.evidence_ref.trim()) fail(`${label} evidence_ref is required`);\n  return item.evidence_ref.trim();\n}\nfunction requirePncSourceKind(value, label) {\n  if (typeof value !== 'string' || !value.trim()) fail(`${label} source_kind is required`);\n  const normalized = value.trim().toLowerCase();\n  if (!PNC_RUNTIME_SOURCE_KINDS.has(normalized)) fail(`${label} source_kind is unsupported: ${value}`);\n  return normalized;\n}\nfunction requireCurrentObserved",
+              'source kind helper',
+          )
+          replace_once(
+              "    if (site.listener_resolution !== 'qualified-inferred') fail(`route ${route.key} cannot qualify Site ${site.name} unless listener_resolution=qualified-inferred`);\n    const gateway = serverByKey.get(route.gateway_server_key);",
+              "    if (site.listener_resolution !== 'qualified-inferred') fail(`route ${route.key} cannot qualify Site ${site.name} unless listener_resolution=qualified-inferred`);\n    if (route.status !== 'qualified') fail(`route ${route.key} status must be qualified`);\n    const gateway = serverByKey.get(route.gateway_server_key);",
+              'route status gate',
+          )
+          replace_once(
+              "      if (item.kind !== 'pnc_runtime_connectivity') fail(`${label} kind must be pnc_runtime_connectivity`);\n      if (typeof item.source_kind !== 'string' || !item.source_kind.trim()) fail(`${label} source_kind is required`);",
+              "      if (item.kind !== 'pnc_runtime_connectivity') fail(`${label} kind must be pnc_runtime_connectivity`);\n      const sourceKind = requirePncSourceKind(item.source_kind, label);",
+              'PNC source normalization',
+          )
+          replace_once(
+              "        source_kind: item.source_kind.trim(),",
+              "        source_kind: sourceKind,",
+              'canonical PNC source kind emission',
+          )
+          replace_once(
+              "      status: route.status ?? 'qualified',",
+              "      status: route.status,",
+              'route status emission',
+          )
+          replace_once(
+              "  for (const agent of mftAgents) {",
+              "  for (const agent of sortByKey(mftAgents)) {",
+              'MFT deterministic processing',
+          )
+          replace_once(
+              "      if (relation.evidence_class !== 'inferred') fail('FTP qualified topology route must remain inferred evidence');",
+              "      if (source.status !== 'qualified') fail('FTP qualified topology route source must have status=qualified');\n      if (relation.evidence_class !== 'inferred') fail('FTP qualified topology route must remain inferred evidence');",
+              'validated route status',
+          )
+          replace_once(
+              "        if (!source?.source_kind || !source?.evidence_ref) fail('FTP route PNC source metadata is incomplete');\n        if (source.evidence_ref === relation.properties?.site_access_evidence?.evidence_ref) fail('FTP PNC corroboration must remain independent of Site-access evidence');\n        sourceKinds.add(source.source_kind);",
+              "        if (!source?.source_kind || !source?.evidence_ref) fail('FTP route PNC source metadata is incomplete');\n        const canonicalSourceKind = requirePncSourceKind(source.source_kind, 'FTP route PNC source');\n        if (source.evidence_ref === relation.properties?.site_access_evidence?.evidence_ref) fail('FTP PNC corroboration must remain independent of Site-access evidence');\n        sourceKinds.add(canonicalSourceKind);",
+              'validated PNC source vocabulary',
+          )
+          replace_once(
+              "    if (typeof unresolved.reason !== 'string' || !unresolved.reason.trim()) fail(`unresolved reason missing ${unresolved.ref}`);",
+              "    if (typeof unresolved.reason !== 'string' || !unresolved.reason.trim()) fail(`unresolved reason missing ${unresolved.ref}`);\n    if (unresolved.reason.trim().length > 500) fail(`unresolved reason exceeds import limit ${unresolved.ref}`);",
+              'validated unresolved reason length',
+          )
+          normalizer.write_text(text)
+
+          tests = Path('scripts/test-ftp-observation-bundle.mjs')
+          t = tests.read_text()
+          def treplace(old, new, label):
+              global t
+              if old not in t:
+                  raise SystemExit(f'missing test patch target: {label}')
+              t = t.replace(old, new, 1)
+
+          treplace("assert(first.run.collector_version === '0.4.0', 'wrong adapter version');", "assert(first.run.collector_version === '0.5.0', 'wrong adapter version');", 'test adapter version')
+          treplace(
+              "const stoppedSite = clone(fixture);\nstoppedSite.sites.find(x=>x.key==='site-external-user').status = 'stopped';",
+              "const missingRouteStatus = clone(fixture);\ndelete missingRouteStatus.routes[0].status;\nassert(rejectedWith(missingRouteStatus, /status must be qualified/), 'missing route status was promoted to qualified');\n\nconst unqualifiedRouteStatus = clone(fixture);\nunqualifiedRouteStatus.routes[0].status = 'unqualified';\nassert(rejectedWith(unqualifiedRouteStatus, /status must be qualified/), 'explicit unqualified route was promoted to qualified');\n\nconst stoppedSite = clone(fixture);\nstoppedSite.sites.find(x=>x.key==='site-external-user').status = 'stopped';",
+              'route status regressions',
+          )
+          treplace(
+              "const listenerMasqueradingAsPnc = clone(fixture);",
+              "const caseVariantPncSourceKind = clone(fixture);\ncaseVariantPncSourceKind.routes[0].pnc.corroboration[1].source_kind = caseVariantPncSourceKind.routes[0].pnc.corroboration[0].source_kind.toUpperCase();\nassert(rejectedWith(caseVariantPncSourceKind, /at least two distinct runtime source kinds/), 'case-only source-kind variants were accepted as independent PNC corroboration');\n\nconst unsupportedPncSourceKind = clone(fixture);\nunsupportedPncSourceKind.routes[0].pnc.corroboration[1].source_kind = 'listener_runtime';\nassert(rejectedWith(unsupportedPncSourceKind, /source_kind is unsupported/), 'unsupported PNC source kind was accepted');\n\nconst listenerMasqueradingAsPnc = clone(fixture);",
+              'PNC source-kind regressions',
+          )
+          treplace(
+              "const sharedGatewayEndpoint = clone(fixture);",
+              "const overlongGapReason = clone(fixture);\noverlongGapReason.gaps.find(x=>x.site_key==='site-external-ftps').reason = 'x'.repeat(501);\nassert(rejectedWith(overlongGapReason, /reason must not exceed 500 characters/), 'overlong unresolved reason passed normalization');\n\nconst sharedGatewayEndpoint = clone(fixture);",
+              'reason length regression',
+          )
+          treplace(
+              "const sameQm = clone(fixture);",
+              "const sharedMftQm = clone(fixture);\nsharedMftQm.mft_agents[0].evidence_ref = 'ev:mft-shared';\nsharedMftQm.mft_agents[1].evidence_ref = 'ev:mft-shared';\nsharedMftQm.mft_agents[0].agent_queue_manager = 'QM_SHARED';\nsharedMftQm.mft_agents[1].coordination_queue_manager = 'QM_SHARED';\nconst sharedMftBundle = normalizeProjection(sharedMftQm);\nconst sharedMftReordered = clone(sharedMftQm);\nsharedMftReordered.mft_agents.reverse();\nconst sharedMftReorderedBundle = normalizeProjection(sharedMftReordered);\nassert(sharedMftReorderedBundle.run.run_id === sharedMftBundle.run.run_id, 'shared MFT QM run_id changed only because agent input order changed');\nassert(JSON.stringify(sharedMftReorderedBundle) === JSON.stringify(sharedMftBundle), 'shared MFT QM anchor provenance changed only because agent input order changed');\n\nconst sameQm = clone(fixture);",
+              'MFT shared-QM determinism regression',
+          )
+          tests.write_text(t)
+
+          docs = Path('docs/phase-ftp-evidence-integration.md')
+          d = docs.read_text()
+          old = "The production boundary is fail-closed: every Site must carry an explicit `started` or `stopped` state; only an explicitly `started` Site with `listener_resolution = qualified-inferred` can qualify a route; blank evidence references are rejected; PNC qualification requires provenance-bearing current observations from at least two distinct runtime source kinds; shared gateway endpoints are projected in deterministic route-key order; and each unresolved Site reference carries its reason in the top-level semantic-import contract field as well as operator-facing properties."
+          new = "The production boundary is fail-closed: every Site must carry an explicit `started` or `stopped` state; only an explicitly `started` Site with `listener_resolution = qualified-inferred` and explicit `route.status = qualified` can qualify a route; blank evidence references are rejected; PNC runtime source kinds are canonicalized to the controlled `dmz_gateway_runtime` / `eft_runtime` vocabulary before independence is evaluated; shared gateway endpoints and MFT agents are processed deterministically; and each unresolved Site reference carries a nonblank reason no longer than the semantic-import 500-character limit in the top-level contract field as well as operator-facing properties."
+          if old not in d:
+              raise SystemExit('missing docs patch target')
+          docs.write_text(d.replace(old, new, 1))
+          PY
+
+      - name: Validate hardened FTP normalizer
+        run: |
+          node --check scripts/normalize-ftp-evidence.mjs
+          node --check scripts/test-ftp-observation-bundle.mjs
+          node scripts/test-ftp-observation-bundle.mjs
+          node scripts/normalize-ftp-evidence.mjs --input scripts/fixtures/ftp-projection-sanitized.json --output /tmp/ftp-observation-bundle.json
+
+      - name: Commit hardened changes and remove one-shot workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/ftp-final-review-fix2.yml
+          git config user.name "Alajmah"
+          git config user.email "55954113+Alajmah@users.noreply.github.com"
+          git add scripts/normalize-ftp-evidence.mjs scripts/test-ftp-observation-bundle.mjs docs/phase-ftp-evidence-integration.md .github/workflows/ftp-final-review-fix2.yml
+          git commit -m "Phase FTP: close final Codex review gaps"
+          git push origin HEAD:ftp-evidence-integration
