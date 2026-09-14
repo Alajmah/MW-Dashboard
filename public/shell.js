@@ -15,8 +15,9 @@ import "/phase2g-investigation-clarity.js?v=20260911-1";
 import "/phase2h-topology-impact.js?v=20260911-1";
 import "/administration-ops.js?v=20260911-1";
 import "/phase2o-demo-manual-mode.js?v=20260912-1";
+import "/filetransfer-view.js?v=20260914-1";
 
-const UI_ASSET_REVISION = "20260911-7";
+const UI_ASSET_REVISION = "20260914-1";
 
 const shellCopy = {
   overview: ["Overview", "Evidence-backed operational attention across the current canonical middleware estate."],
@@ -25,6 +26,7 @@ const shellCopy = {
   servers: ["Servers", "Physical middleware hosts and confirmed queue-manager placement. Client IPs remain application/network evidence, not physical servers."],
   middleware: ["Middleware", "Legacy snapshot view retained while middleware-specific canonical projections are migrated."],
   applications: ["Applications", "Legacy snapshot view retained while application-specific canonical projections are migrated."],
+  filetransfer: ["File Transfer", "Evidence-backed EFT, DMZ Gateway, MQ MFT and transfer-storage topology with unresolved mappings kept explicit."],
   routes: ["Routes", "Trace canonical delivery semantics, runtime queue access and MQ transport while keeping access evidence distinct from actual PUT/GET activity."],
   snapshots: ["Collection", "Evidence sources, imports and retained canonical revisions for traceability."],
   administration: ["Administration", "Manual OSI evidence handoff for the demo: topology and operational evaluations arrive as transferred artifacts; no direct middleware connection is required."],
@@ -78,6 +80,10 @@ function legacyView(view) {
 async function navigate(view) {
   shellSetView(view);
   try {
+    if (view === "filetransfer") {
+      await window.osiRenderFileTransfer?.();
+      return;
+    }
     if (view === "routes") {
       await ensureCanonicalRoutes();
       return;
@@ -112,7 +118,7 @@ async function navigate(view) {
     if (message) {
       message.hidden = false;
       message.className = "global-message error";
-      const source = view === "routes" ? "Canonical route" : view === "servers" ? "Canonical server" : view === "qmgrs" ? "Canonical queue manager" : view === "administration" ? "Administration" : "Legacy view";
+      const source = view === "filetransfer" ? "File-transfer view" : view === "routes" ? "Canonical route" : view === "servers" ? "Canonical server" : view === "qmgrs" ? "Canonical queue manager" : view === "administration" ? "Administration" : "Legacy view";
       message.textContent = `${source} failed to load: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
@@ -131,10 +137,11 @@ document.getElementById("jumpInventory")?.addEventListener("click", () => naviga
 // module has been loaded during the same browser session.
 document.addEventListener("click", (event) => {
   const view = event.target.closest("[data-view]")?.dataset.view || event.target.closest("[data-go]")?.dataset.go;
-  if (["overview", "inventory", "routes", "servers", "qmgrs", "administration"].includes(view)) {
+  if (["overview", "inventory", "filetransfer", "routes", "servers", "qmgrs", "administration"].includes(view)) {
     shellSetView(view);
     if (view === "servers") setTimeout(() => window.osiRenderCanonicalServers?.(), 0);
     if (view === "qmgrs") setTimeout(() => window.osiRenderQueueManagers?.(), 0);
+    if (view === "filetransfer") setTimeout(() => window.osiRenderFileTransfer?.(), 0);
     if (view === "overview") {
       setTimeout(() => window.osiRenderQmgrLedger?.(), 0);
       setTimeout(() => window.osiRefreshOperationalIntelligence?.(), 80);
