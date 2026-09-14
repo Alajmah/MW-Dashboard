@@ -7,6 +7,7 @@
   <title>MW Dashboard · Operational Intelligence</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/routes-v2.css" />
+  <link rel="stylesheet" href="/ftp-operator.css?v=20260914-1" />
   <link rel="stylesheet" href="/readability.css" />
   <link rel="stylesheet" href="/estate-ui.css" />
   <link rel="stylesheet" href="/operations-terminal.css" />
@@ -107,37 +108,37 @@
         <section class="route-workbench panel">
           <div class="route-workbench-head">
             <div>
-              <p class="section-kicker">Message delivery trace</p>
-              <h2>What path does this message take?</h2>
-              <p>Select an application or queue at each end. The trace follows message-delivery relationships, then expands MQ transport separately so XMITQ and sender-channel evidence is not hidden by a shorter logical target mapping.</p>
+              <p class="section-kicker">Canonical route trace</p>
+              <h2>What path can the current evidence support?</h2>
+              <p>Select canonical endpoints to inspect MQ, ACE, DataPower or file-transfer delivery semantics. Route qualification, runtime access, historical activity and transaction outcomes remain separate evidence claims.</p>
             </div>
-            <span class="route-mode-badge"><i></i>Evidence-aware delivery</span>
+            <span class="route-mode-badge"><i></i>Canonical · evidence-aware</span>
           </div>
           <form id="routeForm" class="route-form-v2">
             <div class="route-picker">
-              <div class="route-picker-label"><span>Source</span><small>Producer or queue</small></div>
-              <input id="routeFrom" type="search" autocomplete="off" placeholder="Search application or queue…" required />
-              <div id="routeFromContext" class="route-picker-context">Choose an application or queue</div>
+              <div class="route-picker-label"><span>Source</span><small>Application, flow, queue or transfer path</small></div>
+              <input id="routeFrom" type="search" autocomplete="off" placeholder="Search source entity…" required />
+              <div id="routeFromContext" class="route-picker-context">Choose an exact canonical source entity</div>
               <div id="routeFromResults" class="route-suggestions" role="listbox"></div>
             </div>
             <button id="routeSwap" class="route-swap ghost" type="button" title="Swap source and destination" aria-label="Swap source and destination">⇄</button>
             <div class="route-picker">
-              <div class="route-picker-label"><span>Destination</span><small>Target queue or consumer</small></div>
-              <input id="routeTo" type="search" autocomplete="off" placeholder="Search destination application or queue…" required />
-              <div id="routeToContext" class="route-picker-context">Choose a destination application or queue</div>
+              <div class="route-picker-label"><span>Destination</span><small>Application, queue or transfer endpoint</small></div>
+              <input id="routeTo" type="search" autocomplete="off" placeholder="Search destination entity…" required />
+              <div id="routeToContext" class="route-picker-context">Choose an exact canonical destination entity</div>
               <div id="routeToResults" class="route-suggestions" role="listbox"></div>
             </div>
-            <button class="route-submit" type="submit">Trace delivery</button>
+            <button class="route-submit" type="submit">Trace evidence</button>
             <datalist id="routeObjects" hidden></datalist>
           </form>
           <div class="route-help">
-            <div class="route-help-copy"><strong>How to read the result:</strong> the main journey is the logical delivery chain. When a QREMOTE is involved, its XMITQ → sender channel → endpoint → remote queue manager transport is expanded underneath that hop. Observed, configured and inferred evidence stay visibly separate.</div>
-            <div id="routeSuggestions" class="route-quick"><span>Open Routes to load route evidence…</span></div>
+            <div class="route-help-copy"><strong>How to read the result:</strong> each segment retains its own evidence class and time scope. MQ handle access is not PUT/GET activity; an evidence-qualified FTP topology path is not proof of a completed file transfer.</div>
+            <div id="routeSuggestions" class="route-quick"><span>Open Routes to load canonical route evidence…</span></div>
           </div>
         </section>
         <section class="panel route-results-v2">
           <div class="section-heading compact-heading"><div><p class="section-kicker">Evidence journey</p><h2 id="routeTitle">No route selected</h2></div><span id="routeMeta"></span></div>
-          <div id="routeResult" class="route-empty">Choose a source and destination. We will show the best supported delivery route, transport details, evidence quality and any missing placement.</div>
+          <div id="routeResult" class="route-empty">Choose a source and destination. We will show the strongest supported semantic route, evidence quality, technology-specific details and explicit gaps without inventing missing observations.</div>
         </section>
       </section>
 
