@@ -15,9 +15,9 @@ import "/phase2g-investigation-clarity.js?v=20260911-1";
 import "/phase2h-topology-impact.js?v=20260911-1";
 import "/administration-ops.js?v=20260911-1";
 import "/phase2o-demo-manual-mode.js?v=20260912-1";
-import "/filetransfer-view.js?v=20260914-1";
+import "/filetransfer-view.js?v=20260914-2";
 
-const UI_ASSET_REVISION = "20260914-1";
+const UI_ASSET_REVISION = "20260914-2";
 
 const shellCopy = {
   overview: ["Overview", "Evidence-backed operational attention across the current canonical middleware estate."],
