@@ -92,7 +92,7 @@ The production boundary is fail-closed: every Site must carry an explicit `start
 
 These rules prevent current-state, independence, determinism, or unresolved-reason semantics from being reconstructed later by assumption.
 
-The current hardened adapter revision is `0.4.0`; semantic corrections that change projection behavior therefore receive a distinct deterministic run fingerprint.
+The current hardened adapter revision is `0.5.0`; semantic corrections that change projection behavior therefore receive a distinct deterministic run fingerprint.
 
 ## Sensitive-data boundary
 
