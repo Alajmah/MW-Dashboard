@@ -15,9 +15,9 @@ import "/phase2g-investigation-clarity.js?v=20260911-1";
 import "/phase2h-topology-impact.js?v=20260911-1";
 import "/administration-ops.js?v=20260911-1";
 import "/phase2o-demo-manual-mode.js?v=20260912-1";
-import "/ftp-operator.js?v=20260914-1";
+import "/ftp-operator.js?v=20260915-1";
 
-const UI_ASSET_REVISION = "20260914-1";
+const UI_ASSET_REVISION = "20260915-1";
 
 const shellCopy = {
   overview: ["Overview", "Evidence-backed operational attention across the current canonical middleware estate."],
@@ -26,7 +26,7 @@ const shellCopy = {
   servers: ["Servers", "Physical middleware hosts and confirmed queue-manager placement. Client IPs remain application/network evidence, not physical servers."],
   middleware: ["Middleware", "Legacy snapshot view retained while middleware-specific canonical projections are migrated."],
   applications: ["Applications", "Legacy snapshot view retained while application-specific canonical projections are migrated."],
-  routes: ["Routes", "Trace evidence-qualified MQ, ACE, DataPower and file-transfer routes while keeping topology, runtime access and transaction outcomes distinct."],
+  routes: ["Routes", "Follow a service path across middleware, distinguish what is current, historical, inferred or unknown, then inspect the evidence behind each supported claim."],
   snapshots: ["Collection", "Evidence sources, imports and retained canonical revisions for traceability."],
   administration: ["Administration", "Manual OSI evidence handoff for the demo: topology and operational evaluations arrive as transferred artifacts; no direct middleware connection is required."],
 };
