@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This phase adds a current, evidence-preserving FTP/file-transfer projection without changing the canonical identity principles established for MQ, ACE, and DataPower.
+This phase adds an evidence-preserving FTP/file-transfer projection without changing the canonical identity principles established for MQ, ACE, and DataPower.
 
 The first implementation deliberately reuses the existing semantic registry primitives:
 
@@ -18,44 +18,51 @@ No new registry type is required for the first slice.
 
 ## Source boundary
 
-The private production evidence stays outside Git. The repository contains only:
-
-- the normalizer;
-- a sanitized RFC 5737 fixture;
-- regression tests;
-- this design note.
+The private production evidence stays outside Git. The repository contains only the normalizer, a sanitized RFC 5737 fixture, regression tests, and this design note.
 
 The normalizer consumes `osi.ftp.projection/v1` and emits `osi.observation.bundle/v2` for the existing semantic import/reconciliation path.
 
+The output uses only import-supported coverage modes: `complete`, `point_in_time`, `partial`, `failed`, and `not_collected`.
+
 ## Epistemic rules
 
-### Site access is not file-transfer completion
+### Historical Site access is not current traversal
 
-A qualified inbound EFT route may be emitted only when all of the following are present:
+The retained DMZ activity logs prove that a Site used a specific gateway listener during the recorded activity window. They do not prove that the Site is traversing that listener at the exact current instant.
 
-1. the EFT Site is current;
-2. DMZ activity evidence observes that Site on a specific gateway listener;
-3. the EFT/DMZ Peer Notification Channel is independently corroborated by current runtime evidence.
+A qualified inbound topology route may therefore be emitted only when all of the following are present:
 
-The resulting `integration.routes_to` relation remains:
+1. the EFT Site is current/started;
+2. the gateway listener is currently observed;
+3. historical DMZ activity evidence ties that Site to the listener;
+4. the EFT/DMZ Peer Notification Channel is independently corroborated by current observed runtime evidence.
 
-- `evidence_class = observed`;
-- `properties.epistemic = observed`;
+That composition is emitted as:
+
+- `integration.routes_to.evidence_class = inferred`;
+- `properties.epistemic = inferred`;
+- `properties.site_access_evidence.time_scope = historical`;
+- `properties.current_listener_evidence.time_scope = current`;
+- `properties.runtime_corroboration[0].time_scope = current`;
 - `properties.runtime_transfer_completion = false`.
 
-A route therefore means **observed Site access through a currently connected gateway path**. It does not mean that a file completed transfer.
+The relation therefore means **an evidence-qualified topology path**, not current Site traversal and not completed file transfer.
+
+Historical Site-access evidence is never relabeled as a current observed route.
 
 ### Unresolved Sites remain unresolved
 
-A Site discovered as started/current is emitted as a `filetransfer.endpoint`, but the normalizer does not create a qualified route unless the Site-to-listener evidence exists.
+A Site discovered as started/current is emitted as a `filetransfer.endpoint`, but the normalizer does not create a qualified topology route unless the evidence composition above is complete.
 
-Historical Event Rule activity is allowed only as contextual Site metadata. Historical-only activity cannot promote a current route.
+`External FTPS` and `Internal User` remain explicit unresolved Site-to-listener references in the initial slice.
 
-### PNC is transport corroboration
+Historical Event Rule activity is contextual only and cannot resolve those mappings.
 
-Client listeners and PNC endpoints are separate canonical objects. A client-facing listener must never be reused as the PNC endpoint merely because both belong to the same DMZ Gateway.
+### Client listener and PNC are distinct
 
-The normalizer fails closed if a route does not include an independently corroborated PNC endpoint.
+Client-facing listeners and PNC endpoints are separate canonical objects. A client listener must never be reused as the PNC endpoint merely because both belong to the same DMZ Gateway.
+
+The normalizer fails closed unless listener evidence is current+observed and PNC evidence is current+observed+independently corroborated.
 
 ### MQ Managed File Transfer
 
@@ -70,6 +77,12 @@ The MFT relations are `configured` logical dependencies. They explicitly state t
 Local EFT paths are represented as `filetransfer.endpoint` objects with `endpoint_kind = filesystem_path`.
 
 A local NTFS path is not promoted to an NFS dependency unless an independent source proves that relationship.
+
+## Determinism and retry safety
+
+The source `run_id` fingerprints the complete normalized input contract, environment, adapter version, and normalizer version—not only object keys. A semantic correction with the same object keys therefore produces a different run ID, while harmless reordering of top-level keyed arrays does not.
+
+This avoids the recovery problem where changed evidence could collide with a previously imported deterministic run ID.
 
 ## Sensitive-data boundary
 
@@ -88,6 +101,6 @@ Before production publication:
 3. inspect the resulting Observation Bundle;
 4. publish through the existing protected semantic-import path;
 5. rebuild/activate the canonical estate;
-6. verify estate freshness and route/source identity semantics.
+6. verify estate freshness, unresolved mappings, MQ identity reconciliation, and route semantics.
 
-The initial accepted production slice may contain three qualified inbound Site routes while keeping other Site-listener relationships explicitly unresolved.
+The initial accepted slice may contain three **inferred qualified topology paths** while keeping the other two Site-listener relationships explicitly unresolved.
