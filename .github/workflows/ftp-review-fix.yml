@@ -41,3 +41,5 @@ jobs:
           git add scripts/normalize-ftp-evidence.mjs scripts/test-ftp-observation-bundle.mjs scripts/fixtures/ftp-projection-sanitized.json docs/phase-ftp-evidence-integration.md
           git commit -m "Phase FTP: harden review provenance boundaries"
           git push origin HEAD:ftp-evidence-integration
+
+# retry after aligning patch substitutions with current branch
