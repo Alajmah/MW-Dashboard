@@ -40,4 +40,8 @@ new_route_validate = \'\'\'      if (!Array.isArray(corroboration.sources) || co
 s = replace_once(s, old_route_validate, new_route_validate, "PNC output validator")
 '''
 s = s[:start] + replacement + s[end:]
+s = s.replace(
+    'The normalizer fails closed if a route does not include an independently corroborated PNC endpoint.',
+    'The normalizer fails closed unless listener evidence is current+observed and PNC evidence is current+observed+independently corroborated.',
+)
 p.write_text(s)
