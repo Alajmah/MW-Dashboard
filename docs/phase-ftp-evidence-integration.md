@@ -54,7 +54,7 @@ Historical Site-access evidence is never relabeled as a current observed route.
 
 A Site discovered as started/current is emitted as a `filetransfer.endpoint`, but the normalizer does not create a qualified topology route unless the evidence composition above is complete.
 
-`External FTPS` and `Internal User` remain explicit unresolved Site-to-listener references in the initial slice.
+`External FTPS` and `Internal User` remain explicit unresolved Site-to-listener references in the accepted production slice until independent current evidence resolves them.
 
 Historical Event Rule activity is contextual only and cannot resolve those mappings.
 
@@ -100,17 +100,10 @@ The input contract forbids secret-bearing keys such as passwords, credentials, t
 
 The resulting Observation Bundle does not contain MFT service command lines or credential files.
 
-## Production gate
+## Production publication status
 
-This branch does **not** publish the real FTP bundle.
+The sanitized CI fixture intentionally contains three qualified inbound paths; fixture cardinality is not production cardinality.
 
-Before production publication:
+The accepted production publication verified on 2026-09-14 contains **four qualified inferred FTP topology routes**. The two Site-to-listener mappings for `External FTPS` and `Internal User` remain explicit unresolved references. `runtime_transfer_completion=false` remains intact, so publication does not establish that a file transfer completed.
 
-1. generate a private `osi.ftp.projection/v1` from the validated evidence packages;
-2. run the repository normalizer locally;
-3. inspect the resulting Observation Bundle;
-4. publish through the existing protected semantic-import path;
-5. rebuild/activate the canonical estate;
-6. verify estate freshness, unresolved mappings, MQ identity reconciliation, and route semantics.
-
-The initial accepted slice may contain three **inferred qualified topology paths** while keeping the other two Site-listener relationships explicitly unresolved.
+The production publication was accepted only after the private projection was normalized locally, inspected, published through the protected semantic-import path, reconciled into the canonical estate, and verified for route semantics, unresolved mappings, and MQ identity compatibility.
