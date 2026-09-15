@@ -3,6 +3,13 @@ import { handleOperatorReadModel, type OperatorReadModelEnv } from "./operator-r
 type JsonMap = Record<string, any>;
 type Row = Record<string, any>;
 
+type PathList = {
+  estate: JsonMap;
+  page: { total: number; limit: number; offset: number; next_offset: number | null };
+  paths: JsonMap[];
+};
+type PathListResult = { response: Response } | { data: PathList };
+
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
@@ -18,11 +25,8 @@ function parseJson(value: unknown, fallback: unknown) {
 }
 
 function integerParam(url: URL, name: string, fallback: number, maximum: number): number {
-  const raw = url.searchParams.get(name);
-  if (raw == null || raw === "") return fallback;
-  const value = Number.parseInt(raw, 10);
-  if (!Number.isFinite(value) || value < 0) return fallback;
-  return Math.min(value, maximum);
+  const value = Number.parseInt(url.searchParams.get(name) ?? "", 10);
+  return Number.isFinite(value) && value >= 0 ? Math.min(value, maximum) : fallback;
 }
 
 async function sourceSetHash(values: string[]): Promise<string> {
@@ -52,7 +56,7 @@ async function freshEstate(db: D1Database): Promise<Row | Response | null> {
   return estate;
 }
 
-function estateMetadata(estate: Row, estateId: string) {
+function estateMetadata(estate: Row, estateId: string): JsonMap {
   return {
     estate_revision_id: estateId,
     source_set_hash: estate.source_set_hash,
@@ -63,7 +67,7 @@ function estateMetadata(estate: Row, estateId: string) {
   };
 }
 
-function entityFromRow(row: Row, prefix: "s" | "t") {
+function entityFromRow(row: Row, prefix: "s" | "t"): JsonMap {
   return {
     entity_id: row[`${prefix}_entity_id`],
     semantic_type: row[`${prefix}_semantic_type`],
@@ -79,7 +83,7 @@ function entityFromRow(row: Row, prefix: "s" | "t") {
   };
 }
 
-function normalizeGap(raw: Row) {
+function normalizeGap(raw: Row): JsonMap {
   return {
     unresolved_id: raw.unresolved_id ?? null,
     source_entity_id: raw.source_entity_id ?? null,
@@ -92,7 +96,7 @@ function normalizeGap(raw: Row) {
   };
 }
 
-async function unresolvedFor(db: D1Database, estateId: string, ids: string[]) {
+async function unresolvedFor(db: D1Database, estateId: string, ids: string[]): Promise<JsonMap[]> {
   const unique = [...new Set(ids.filter(Boolean))];
   if (!unique.length) return [];
   const placeholders = unique.map(() => "?").join(",");
@@ -105,22 +109,18 @@ async function unresolvedFor(db: D1Database, estateId: string, ids: string[]) {
   return (result.results ?? []).map(normalizeGap);
 }
 
-function humanizeSourceKind(value: unknown): string {
-  return String(value || "").replaceAll("_", " ");
-}
-
 function humanize(value: unknown): string {
   return String(value ?? "unknown").replaceAll("_", " ");
 }
 
-function fileTransferPath(row: Row, source: JsonMap, target: JsonMap, gaps: JsonMap[]) {
+function humanizeSourceKind(value: unknown): string {
+  return String(value || "").replaceAll("_", " ");
+}
+
+function fileTransferPath(row: Row, source: JsonMap, target: JsonMap, gaps: JsonMap[]): JsonMap {
   const properties = parseJson(row.properties_json, {}) as JsonMap;
-  const siteAccess = properties.site_access_evidence && typeof properties.site_access_evidence === "object"
-    ? properties.site_access_evidence as JsonMap
-    : {};
-  const listener = properties.current_listener_evidence && typeof properties.current_listener_evidence === "object"
-    ? properties.current_listener_evidence as JsonMap
-    : {};
+  const siteAccess = properties.site_access_evidence && typeof properties.site_access_evidence === "object" ? properties.site_access_evidence as JsonMap : {};
+  const listener = properties.current_listener_evidence && typeof properties.current_listener_evidence === "object" ? properties.current_listener_evidence as JsonMap : {};
   const corroboration = Array.isArray(properties.runtime_corroboration) ? properties.runtime_corroboration as JsonMap[] : [];
   const corroborated = corroboration.find((item) => item?.time_scope === "current" && item?.independently_corroborated === true) ?? corroboration[0] ?? {};
   const listenerCurrent = listener.time_scope === "current";
@@ -131,11 +131,7 @@ function fileTransferPath(row: Row, source: JsonMap, target: JsonMap, gaps: Json
   const sourceName = String(source.display_name || source.identity_key || "Access context");
   const targetName = String(target.display_name || target.identity_key || "EFT Site");
   const gateway = String(properties.gateway_server_key || corroborated.gateway_server_key || "DMZ gateway");
-  const completion = properties.runtime_transfer_completion === true
-    ? "observed"
-    : properties.runtime_transfer_completion === false
-      ? "not_observed"
-      : "unknown";
+  const completion = properties.runtime_transfer_completion === true ? "observed" : properties.runtime_transfer_completion === false ? "not_observed" : "unknown";
 
   return {
     id: String(row.relation_id),
@@ -153,34 +149,10 @@ function fileTransferPath(row: Row, source: JsonMap, target: JsonMap, gaps: Json
     gaps,
     explanation: "An evidence-qualified FTP topology path is supported by the canonical estate. Historical Site access, current listener evidence, and independently corroborated PNC connectivity remain separate claims; transfer completion is independent.",
     nodes: [
-      {
-        role: "Access context",
-        title: sourceName,
-        state: siteAccess.time_scope === "historical" ? "Historical" : siteAccess.time_scope === "current" ? "Current" : "Unknown",
-        state_kind: siteAccess.time_scope === "historical" ? "info" : siteAccess.time_scope === "current" ? "good" : "warn",
-        note: siteAccess.time_scope === "historical" ? "Observed Site-access window retained" : "Site-access evidence not classified",
-      },
-      {
-        role: "DMZ listener",
-        title: String(listener.endpoint || "Listener endpoint"),
-        state: listenerCurrent ? "Current" : "Unknown",
-        state_kind: listenerCurrent ? "good" : "warn",
-        note: gateway,
-      },
-      {
-        role: "PNC boundary",
-        title: String(corroborated.endpoint || "PNC boundary"),
-        state: pncCurrent ? "Corroborated" : "Unknown",
-        state_kind: pncCurrent ? "good" : "warn",
-        note: sourceKinds.length ? sourceKinds.join(" + ") : "Runtime source unavailable",
-      },
-      {
-        role: "EFT Site",
-        title: targetName,
-        state: "Topology destination",
-        state_kind: "info",
-        note: "Canonical endpoint; traversal is not implied",
-      },
+      { role: "Access context", title: sourceName, state: siteAccess.time_scope === "historical" ? "Historical" : siteAccess.time_scope === "current" ? "Current" : "Unknown", state_kind: siteAccess.time_scope === "historical" ? "info" : siteAccess.time_scope === "current" ? "good" : "warn", note: siteAccess.time_scope === "historical" ? "Observed Site-access window retained" : "Site-access evidence not classified" },
+      { role: "DMZ listener", title: String(listener.endpoint || "Listener endpoint"), state: listenerCurrent ? "Current" : "Unknown", state_kind: listenerCurrent ? "good" : "warn", note: gateway },
+      { role: "PNC boundary", title: String(corroborated.endpoint || "PNC boundary"), state: pncCurrent ? "Corroborated" : "Unknown", state_kind: pncCurrent ? "good" : "warn", note: sourceKinds.length ? sourceKinds.join(" + ") : "Runtime source unavailable" },
+      { role: "EFT Site", title: targetName, state: "Topology destination", state_kind: "info", note: "Canonical endpoint; traversal is not implied" },
     ],
     details: [
       { label: "Source", value: sourceName },
@@ -201,7 +173,7 @@ function fileTransferPath(row: Row, source: JsonMap, target: JsonMap, gaps: Json
   };
 }
 
-function messagingPath(row: Row, source: JsonMap, target: JsonMap, gaps: JsonMap[]) {
+function messagingPath(row: Row, source: JsonMap, target: JsonMap, gaps: JsonMap[]): JsonMap {
   const properties = parseJson(row.properties_json, {}) as JsonMap;
   const corroboration = Array.isArray(properties.runtime_corroboration) ? properties.runtime_corroboration as JsonMap[] : [];
   const sourceName = String(source.display_name || source.identity_key || "DataPower service");
@@ -234,34 +206,10 @@ function messagingPath(row: Row, source: JsonMap, target: JsonMap, gaps: JsonMap
     gaps,
     explanation: "A deterministic DataPower configuration route reaches the MQ queue in the canonical estate. Independent MQ connectivity corroboration supports the runtime boundary only; it does not prove a specific message traversal.",
     nodes: [
-      {
-        role: "DataPower service",
-        title: sourceName,
-        state: "Configured",
-        state_kind: "info",
-        note: String(source.properties?.domain || source.properties?.physical_host || "Canonical DataPower service"),
-      },
-      {
-        role: "Static route",
-        title: backendGroup,
-        state: "Derived from config",
-        state_kind: "info",
-        note: staticResource,
-      },
-      {
-        role: "MQ boundary",
-        title: channel ? `${queueManager} · ${channel}` : queueManager,
-        state: runtimeSupported ? "Corroborated" : "Unknown",
-        state_kind: runtimeSupported ? "good" : "warn",
-        note: runtimeDetail,
-      },
-      {
-        role: "MQ queue",
-        title: targetName,
-        state: "Configured target",
-        state_kind: "info",
-        note: "Canonical queue target; message traversal is not implied",
-      },
+      { role: "DataPower service", title: sourceName, state: "Configured", state_kind: "info", note: String(source.properties?.domain || source.properties?.physical_host || "Canonical DataPower service") },
+      { role: "Static route", title: backendGroup, state: "Derived from config", state_kind: "info", note: staticResource },
+      { role: "MQ boundary", title: channel ? `${queueManager} · ${channel}` : queueManager, state: runtimeSupported ? "Corroborated" : "Unknown", state_kind: runtimeSupported ? "good" : "warn", note: runtimeDetail },
+      { role: "MQ queue", title: targetName, state: "Configured target", state_kind: "info", note: "Canonical queue target; message traversal is not implied" },
     ],
     details: [
       { label: "Source", value: sourceName },
@@ -272,33 +220,17 @@ function messagingPath(row: Row, source: JsonMap, target: JsonMap, gaps: JsonMap
       { label: "Message outcome", value: "not established" },
     ],
     evidence: [
-      {
-        label: "Route configuration",
-        state: "configured + derived",
-        detail: `${String(properties.route_uri_literal || "Route URI retained in canonical relation")} · ${staticResource}`,
-      },
-      {
-        label: "Backend mapping",
-        state: "configured",
-        detail: `${backendGroup} · channel ${channel ? `${channel} (${humanize(channelResolution)})` : humanize(channelResolution)}`,
-      },
-      {
-        label: "MQ connectivity",
-        state: runtimeSupported ? "observed corroboration" : "unknown",
-        detail: runtimeDetail,
-      },
-      {
-        label: "Message outcome",
-        state: "not established",
-        detail: "Qualified configuration and runtime connectivity do not prove PUT, GET, or end-to-end message traversal",
-      },
+      { label: "Route configuration", state: "configured + derived", detail: `${String(properties.route_uri_literal || "Route URI retained in canonical relation")} · ${staticResource}` },
+      { label: "Backend mapping", state: "configured", detail: `${backendGroup} · channel ${channel ? `${channel} (${humanize(channelResolution)})` : humanize(channelResolution)}` },
+      { label: "MQ connectivity", state: runtimeSupported ? "observed corroboration" : "unknown", detail: runtimeDetail },
+      { label: "Message outcome", state: "not established", detail: "Qualified configuration and runtime connectivity do not prove PUT, GET, or end-to-end message traversal" },
     ],
     evidence_classes: parseJson(row.evidence_classes_json, []),
     source_ids: parseJson(row.source_ids_json, []),
   };
 }
 
-async function listOperationalPaths(db: D1Database, limit: number, offset: number) {
+async function listOperationalPaths(db: D1Database, limit: number, offset: number): Promise<PathListResult> {
   const estate = await freshEstate(db);
   if (!estate) return { response: reply({ detail: "No current canonical estate" }, 404) };
   if (estate instanceof Response) return { response: estate };
@@ -307,6 +239,7 @@ async function listOperationalPaths(db: D1Database, limit: number, offset: numbe
     AND json_extract(r.properties_json,'$.qualified_route')=1
     AND ((s.semantic_type='filetransfer.flow' AND t.semantic_type='filetransfer.endpoint' AND json_extract(r.properties_json,'$.route_kind')='eft_inbound_site_path')
       OR (s.semantic_type='datapower.service' AND t.semantic_type='mq.queue'))`;
+
   const [rows, count] = await db.batch([
     db.prepare(`SELECT r.relation_id,r.observed_at,r.properties_json,r.evidence_classes_json,r.source_ids_json,
                        s.entity_id AS s_entity_id,s.semantic_type AS s_semantic_type,s.identity_key AS s_identity_key,s.identity_state AS s_identity_state,s.display_name AS s_display_name,s.observed_at AS s_observed_at,s.properties_json AS s_properties_json,s.evidence_classes_json AS s_evidence_classes_json,s.source_ids_json AS s_source_ids_json,s.evidence_count AS s_evidence_count,s.source_count AS s_source_count,
@@ -324,6 +257,7 @@ async function listOperationalPaths(db: D1Database, limit: number, offset: numbe
                   JOIN semantic_estate_entity t ON t.estate_revision_id=r.estate_revision_id AND t.entity_id=r.target_entity_id
                  WHERE r.estate_revision_id=? AND ${predicate}`).bind(estateId),
   ]);
+
   const rawRows = (rows.results ?? []) as Row[];
   const ids = rawRows.flatMap((row) => [String(row.s_entity_id || ""), String(row.t_entity_id || "")]);
   const unresolved = await unresolvedFor(db, estateId, ids);
@@ -334,6 +268,7 @@ async function listOperationalPaths(db: D1Database, limit: number, offset: numbe
     bucket.push(gap);
     gapsBySource.set(key, bucket);
   }
+
   const paths = rawRows.map((row) => {
     const source = entityFromRow(row, "s");
     const target = entityFromRow(row, "t");
@@ -347,9 +282,11 @@ async function listOperationalPaths(db: D1Database, limit: number, offset: numbe
   });
   const total = Number(((count.results ?? [])[0] as Row | undefined)?.count || 0);
   return {
-    estate: estateMetadata(estate, estateId),
-    page: { total, limit, offset, next_offset: offset + paths.length < total ? offset + paths.length : null },
-    paths,
+    data: {
+      estate: estateMetadata(estate, estateId),
+      page: { total, limit, offset, next_offset: offset + paths.length < total ? offset + paths.length : null },
+      paths,
+    },
   };
 }
 
@@ -361,7 +298,7 @@ async function originalJson(request: Request, env: OperatorReadModelEnv): Promis
   return { response, body };
 }
 
-function compactPath(path: JsonMap) {
+function compactPath(path: JsonMap): JsonMap {
   return {
     id: path.id,
     domain: path.domain,
@@ -385,27 +322,24 @@ export async function handleMultiDomainOperatorPaths(request: Request, env: Oper
   const path = url.pathname;
 
   if (path === "/api/v2/operator/paths") {
-    const limit = Math.max(1, integerParam(url, "limit", 25, 50));
-    const offset = integerParam(url, "offset", 0, MAX_OFFSET);
-    const data = await listOperationalPaths(env.DB, limit, offset);
-    if ("response" in data) return data.response;
-    return reply({ schema_version: "osi.operator.paths/v2", ...data });
+    const result = await listOperationalPaths(env.DB, Math.max(1, integerParam(url, "limit", 25, 50)), integerParam(url, "offset", 0, MAX_OFFSET));
+    if ("response" in result) return result.response;
+    return reply({ schema_version: "osi.operator.paths/v2", ...result.data });
   }
 
   if (path === "/api/v2/operator/overview") {
     const original = await originalJson(request, env);
     if (!original.response.ok || !original.body) return original.response;
-    const data = await listOperationalPaths(env.DB, 4, 0);
-    if ("response" in data) return data.response;
+    const result = await listOperationalPaths(env.DB, 4, 0);
+    if ("response" in result) return result.response;
     return reply({
       ...original.body,
       schema_version: "osi.operator.overview/v2",
-      paths: { total: data.page.total, items: data.paths.map(compactPath) },
+      paths: { total: result.data.page.total, items: result.data.paths.map(compactPath) },
     });
   }
 
-  const investigation = path.match(/^\/api\/v2\/operator\/investigations\/(find_[0-9a-f]{24})$/);
-  if (investigation) {
+  if (/^\/api\/v2\/operator\/investigations\/find_[0-9a-f]{24}$/.test(path)) {
     const original = await originalJson(request, env);
     if (!original.response.ok || !original.body) return original.response;
     const finding = original.body.finding ?? {};
@@ -414,9 +348,9 @@ export async function handleMultiDomainOperatorPaths(request: Request, env: Oper
       ...(Array.isArray(finding.related_entities) ? finding.related_entities.map(String) : []),
     ].filter(Boolean));
     if (!refs.size) return original.response;
-    const data = await listOperationalPaths(env.DB, 50, 0);
-    if ("response" in data) return data.response;
-    const matched = data.paths.find((item) => refs.has(String(item.source?.id || "")) || refs.has(String(item.destination?.id || "")));
+    const result = await listOperationalPaths(env.DB, 50, 0);
+    if ("response" in result) return result.response;
+    const matched = result.data.paths.find((item) => refs.has(String(item.source?.id || "")) || refs.has(String(item.destination?.id || "")));
     return reply({
       ...original.body,
       schema_version: "osi.operator.investigation-detail/v2",
