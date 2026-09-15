@@ -1,20 +1,20 @@
 import "/product-shell.js?v=20260910-1";
 import "/task-first-shell.js?v=20260915-5";
-import "/operator-experience.js?v=20260915-3";
+import "/operator-experience.js?v=20260915-4";
 
 const UI_ASSET_REVISION = "20260915-6";
 
 // Compatibility marker retained for the pre-task-first product-shell contract:
 // inventory: ["Objects"
 const shellCopy = {
-  overview: ["Operations", "Start with what requires attention, then reveal only the context needed to decide what to do next."],
+  overview: ["Operations", "Start with the operational situations that require attention, then reveal individual findings only when they help the next decision."],
   inventory: ["Explore", "Search the canonical estate first; reveal ownership, placement, relationships and evidence only for the object you care about."],
-  investigations: ["Investigations", "Focus on one evidence-linked problem at a time, preserve the working context, and pivot to proof when needed."],
+  investigations: ["Investigations", "Work one operational situation at a time, keep its finding mechanisms visible, and pivot to proof only when needed."],
   qmgrs: ["Queue Managers", "Canonical IBM MQ ownership, physical placement, clusters, object counts and evidence freshness."],
   servers: ["Servers", "Physical middleware hosts and confirmed queue-manager placement. Client IPs remain application/network evidence, not physical servers."],
   middleware: ["Middleware", "Focused middleware inventory retained for drill-down from Explore."],
   applications: ["Applications", "Focused application inventory retained for drill-down from Explore."],
-  routes: ["Paths", "Follow a service path across middleware, distinguish what is current, historical, inferred or unknown, then inspect the evidence behind each supported claim."],
+  routes: ["Paths", "Follow an operational path across middleware, distinguish what is current, historical, inferred or unknown, then inspect the evidence behind each supported claim."],
   snapshots: ["Collection", "Evidence sources, imports and retained canonical revisions for traceability, summarized first as collection trust and evidence limitations."],
   administration: ["Administration", "Manual OSI evidence handoff for the demo: topology and operational evaluations arrive as transferred artifacts; no direct middleware connection is required."],
 };
