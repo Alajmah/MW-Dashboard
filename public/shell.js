@@ -17,9 +17,9 @@ import "/administration-ops.js?v=20260911-1";
 import "/phase2o-demo-manual-mode.js?v=20260912-1";
 import "/ftp-operator.js?v=20260915-2";
 import "/task-first-shell.js?v=20260915-3";
-import "/operator-experience.js?v=20260915-1";
+import "/operator-experience.js?v=20260915-3";
 
-const UI_ASSET_REVISION = "20260915-4";
+const UI_ASSET_REVISION = "20260915-5";
 
 // Compatibility marker retained for the pre-task-first product-shell contract:
 // inventory: ["Objects"
