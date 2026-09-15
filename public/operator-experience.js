@@ -1,4 +1,4 @@
-const OE_REVISION = "20260915-1";
+const OE_REVISION = "20260915-2";
 
 const oeState = {
   core: null,
@@ -13,7 +13,10 @@ const oeState = {
   focusedRelatedFindings: [],
   focusedTab: "overview",
   paths: [],
-  pathGaps: [],
+  pathTotal: 0,
+  pathNextOffset: null,
+  pathEstateRevisionId: null,
+  pathPromise: null,
   selectedPath: 0,
   exploreQuery: "",
   exploreType: "",
@@ -21,6 +24,7 @@ const oeState = {
   exploreTotal: 0,
   exploreSelected: null,
   exploreSummary: null,
+  exploreSequence: 0,
 };
 
 const oe$ = (id) => document.getElementById(id);
@@ -30,21 +34,13 @@ async function oeApi(path) {
   const response = await fetch(path, { headers: { accept: "application/json" } });
   let body = {};
   try { body = await response.json(); } catch {}
-  if (!response.ok) throw new Error(body.detail || `Request failed (${response.status})`);
-  return body;
-}
-
-async function oePaged(path, key, maxPages = 20) {
-  const items = [];
-  let offset = 0;
-  for (let page = 0; page < maxPages; page += 1) {
-    const data = await oeApi(`${path}${path.includes("?") ? "&" : "?"}limit=100&offset=${offset}`);
-    items.push(...(Array.isArray(data[key]) ? data[key] : []));
-    const next = Number(data.page?.next_offset);
-    if (data.page?.next_offset == null || !Number.isFinite(next) || next <= offset) break;
-    offset = next;
+  if (!response.ok) {
+    const error = new Error(body.detail || `Request failed (${response.status})`);
+    error.status = response.status;
+    error.code = body.code;
+    throw error;
   }
-  return items;
+  return body;
 }
 
 function relativeTime(value) {
@@ -96,6 +92,25 @@ function badge(label, style = "neutral") {
 
 function metric(label, value, note, style = "neutral", icon = "•") {
   return `<article class="oe-metric ${oeEsc(style)}"><span class="oe-metric-icon">${oeEsc(icon)}</span><div><strong>${oeEsc(value)}</strong><span>${oeEsc(label)}</span><small>${oeEsc(note)}</small></div></article>`;
+}
+
+function operationalPublished() {
+  return Number(oeState.core?.operations?.current_sources || 0) > 0;
+}
+
+function currentEstateRevisionId() {
+  return oeState.core?.estateStatus?.current_estate?.estate_revision_id || null;
+}
+
+function invalidatePathsIfEstateChanged() {
+  const revision = currentEstateRevisionId();
+  if (!revision || !oeState.pathEstateRevisionId || oeState.pathEstateRevisionId === revision) return;
+  oeState.paths = [];
+  oeState.pathTotal = 0;
+  oeState.pathNextOffset = null;
+  oeState.pathEstateRevisionId = null;
+  oeState.pathPromise = null;
+  oeState.selectedPath = 0;
 }
 
 function installStyles() {
@@ -155,7 +170,7 @@ function installScreens() {
 
   ensureScreen("routes", "oePaths", `
     <div class="oe-page-head"><div><h2>Paths</h2><p>Follow an evidence-backed service path without turning topology into a transaction claim.</p></div><button class="oe-button ghost" data-oe-route-advanced>Advanced trace</button></div>
-    <section class="oe-panel oe-path-selector-panel"><label><span>Select a qualified service path</span><select id="oePathSelect"><option>Loading paths…</option></select></label><button class="oe-button ghost" data-oe-nav="investigations">View findings</button></section>
+    <section class="oe-panel oe-path-selector-panel"><label><span>Select a qualified service path</span><select id="oePathSelect"><option>Loading paths…</option></select></label><div class="oe-head-actions"><button id="oeLoadMorePaths" class="oe-button ghost" data-oe-load-paths hidden>Load more</button><button class="oe-button ghost" data-oe-nav="investigations">View findings</button></div></section>
     <section id="oePathFocus" class="oe-panel"><div class="oe-loading">Loading qualified paths…</div></section>
     <section class="oe-panel"><div class="oe-section-head"><div><h3>Path details</h3><p>Compact topology facts for the selected path.</p></div></div><div id="oePathDetails"></div></section>
     <details id="oePathEvidence" class="oe-panel oe-evidence-disclosure"><summary>Inspect route evidence</summary><div id="oePathEvidenceBody"></div></details>`);
@@ -193,32 +208,57 @@ async function loadCore() {
     oeApi("/api/v2/estate/current/unresolved?limit=12&offset=0"),
   ]);
   oeState.core = { estateStatus, estateSummary, operations, importStatus, telemetry, unresolved };
-  oeState.attentionFindings = [...(open.findings || []), ...(acknowledged.findings || [])]
-    .sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || new Date(b.last_seen || 0) - new Date(a.last_seen || 0));
-  oeState.findingTotals = { open: Number(open.page?.total || 0), acknowledged: Number(acknowledged.page?.total || 0) };
+  invalidatePathsIfEstateChanged();
+  const published = Number(operations.current_sources || 0) > 0;
+  oeState.attentionFindings = published
+    ? [...(open.findings || []), ...(acknowledged.findings || [])].sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || new Date(b.last_seen || 0) - new Date(a.last_seen || 0))
+    : [];
+  oeState.findingTotals = published
+    ? { open: Number(open.page?.total || 0), acknowledged: Number(acknowledged.page?.total || 0) }
+    : { open: 0, acknowledged: 0 };
   oeState.exploreSummary = estateSummary;
 }
 
 function severityRank(value) { return value === "critical" ? 0 : value === "warning" ? 1 : 2; }
 
-async function ensurePaths() {
-  if (oeState.paths.length || oeState.pathGaps.length) return;
-  const [flows, endpoints, relations, gaps] = await Promise.all([
-    oePaged("/api/v2/estate/current/entities?semantic_type=filetransfer.flow", "entities"),
-    oePaged("/api/v2/estate/current/entities?semantic_type=filetransfer.endpoint", "entities"),
-    oePaged("/api/v2/estate/current/relations?semantic_type=integration.routes_to", "relations"),
-    oePaged("/api/v2/estate/current/unresolved?semantic_type=filetransfer.endpoint", "unresolved"),
-  ]);
-  const flowIds = new Set(flows.map((item) => String(item.entity_id)));
-  const endpointIds = new Set(endpoints.map((item) => String(item.entity_id)));
-  const candidates = relations.filter((relation) => flowIds.has(String(relation.source_entity_id)) && endpointIds.has(String(relation.target_entity_id)));
-  oeState.paths = (await Promise.all(candidates.map(async (relation) => {
-    try {
-      const trace = await oeApi(`/api/v2/routes/trace?from=${encodeURIComponent(relation.source_entity_id)}&to=${encodeURIComponent(relation.target_entity_id)}`);
-      return trace?.found && trace?.semantics?.route_domain === "file_transfer" && trace?.semantics?.qualified_route === true ? trace : null;
-    } catch { return null; }
-  }))).filter(Boolean).sort((a, b) => String(a.source?.display_name || "").localeCompare(String(b.source?.display_name || "")));
-  oeState.pathGaps = gaps;
+function applyQualifiedRoutePage(data, append) {
+  const revision = data.estate?.estate_revision_id || currentEstateRevisionId();
+  if (currentEstateRevisionId() && revision && revision !== currentEstateRevisionId()) return false;
+  const incoming = Array.isArray(data.routes) ? data.routes : [];
+  if (!append) oeState.paths = [];
+  const seen = new Set(oeState.paths.map((route) => route.steps?.[0]?.relation_id || `${route.source?.entity_id}:${route.target?.entity_id}`));
+  for (const route of incoming) {
+    const key = route.steps?.[0]?.relation_id || `${route.source?.entity_id}:${route.target?.entity_id}`;
+    if (!seen.has(key)) { seen.add(key); oeState.paths.push(route); }
+  }
+  oeState.pathTotal = Number(data.page?.total || oeState.paths.length);
+  oeState.pathNextOffset = data.page?.next_offset == null ? null : Number(data.page.next_offset);
+  oeState.pathEstateRevisionId = revision || null;
+  if (oeState.selectedPath >= oeState.paths.length) oeState.selectedPath = Math.max(0, oeState.paths.length - 1);
+  return true;
+}
+
+async function ensurePaths({ force = false } = {}) {
+  invalidatePathsIfEstateChanged();
+  const revision = currentEstateRevisionId();
+  if (!force && oeState.paths.length && oeState.pathEstateRevisionId === revision) return;
+  if (oeState.pathPromise) return oeState.pathPromise;
+  oeState.pathPromise = (async () => {
+    const data = await oeApi("/api/v2/routes/qualified?domain=file_transfer&limit=25&offset=0");
+    applyQualifiedRoutePage(data, false);
+  })().finally(() => { oeState.pathPromise = null; });
+  return oeState.pathPromise;
+}
+
+async function loadMorePaths() {
+  if (oeState.pathNextOffset == null || oeState.pathPromise) return;
+  const offset = oeState.pathNextOffset;
+  oeState.pathPromise = (async () => {
+    const data = await oeApi(`/api/v2/routes/qualified?domain=file_transfer&limit=25&offset=${offset}`);
+    applyQualifiedRoutePage(data, true);
+  })().finally(() => { oeState.pathPromise = null; });
+  await oeState.pathPromise;
+  renderPaths();
 }
 
 function routeScope(trace) {
@@ -244,30 +284,43 @@ function renderOperations() {
   const { estateStatus, operations, unresolved } = oeState.core || {};
   if (!estateStatus) return;
   const estate = estateStatus.current_estate || {};
+  const published = operationalPublished();
   const attention = oeState.attentionFindings.slice(0, 6);
+  const pathMetric = oeState.pathEstateRevisionId === currentEstateRevisionId()
+    ? [oeState.pathTotal.toLocaleString(), "Evidence-backed file-transfer paths", oeState.pathTotal ? "info" : "neutral"]
+    : ["…", "Qualified paths loading in the background", "neutral"];
   oe$("oeOpsMetrics").innerHTML = [
-    metric("Open findings", oeState.findingTotals.open.toLocaleString(), "Current evidence-linked items", oeState.findingTotals.open ? "danger" : "good", "△"),
-    metric("Qualified paths", oeState.paths.length.toLocaleString(), "Evidence-backed file-transfer paths", oeState.paths.length ? "info" : "neutral", "⌁"),
+    metric("Open findings", published ? oeState.findingTotals.open.toLocaleString() : "Unknown", published ? "Current evidence-linked items" : "No operational evaluation published", published ? (oeState.findingTotals.open ? "danger" : "good") : "warn", "△"),
+    metric("Qualified paths", pathMetric[0], pathMetric[1], pathMetric[2], "⌁"),
     metric("Knowledge gaps", Number(estate.unresolved_count || 0).toLocaleString(), "Canonical unresolved references", Number(estate.unresolved_count || 0) ? "warn" : "good", "?"),
     metric("Estate freshness", estateStatus.estate_fresh ? "Current" : "Stale", `${Number(estate.entity_count || 0).toLocaleString()} canonical entities`, estateStatus.estate_fresh ? "good" : "danger", "●"),
   ].join("");
-  oe$("oeAttentionTable").innerHTML = attention.length ? `<div class="oe-attention-head"><span>Severity</span><span>Item</span><span>Context</span><span>Detected</span></div>${attention.map((finding) => `<button class="oe-attention-row" type="button" data-oe-finding="${oeEsc(finding.finding_id)}"><span>${badge(finding.severity || "info", tone(finding.severity))}</span><span><strong>${oeEsc(finding.display_name || finding.entity_id || "Finding")}</strong><small>${oeEsc(finding.summary || finding.diagnosis || "Evidence-linked operational finding")}</small></span><span>${oeEsc(typeLabel(finding.semantic_type))}</span><span>${oeEsc(relativeTime(finding.last_seen))}</span></button>`).join("")}` : `<div class="oe-empty-state"><strong>No unresolved findings in current evaluations</strong><p>This remains bounded by published evidence coverage.</p></div>`;
-  oe$("oeAffectedPaths").innerHTML = oeState.paths.slice(0, 4).map((trace, index) => {
-    const scope = routeScope(trace);
-    const current = scope.listener.time_scope === "current" && scope.corroboration.some((item) => item?.time_scope === "current" && item?.independently_corroborated === true);
-    return `<button class="oe-context-row" type="button" data-oe-path-index="${index}"><span><strong>${oeEsc(trace.source?.display_name || "Source")} → ${oeEsc(trace.target?.display_name || "Destination")}</strong><small>${current ? "Current runtime boundary supported" : "Runtime boundary incomplete"}</small></span>${badge("Qualified", "good")}</button>`;
-  }).join("") || `<div class="oe-empty-state"><p>No qualified service paths in the current projection.</p></div>`;
+  if (!published) {
+    oe$("oeAttentionTable").innerHTML = `<div class="oe-empty-state"><strong>Operational attention is unknown</strong><p>No current operational evaluation source is published. Zero findings must not be interpreted as healthy state.</p></div>`;
+  } else {
+    oe$("oeAttentionTable").innerHTML = attention.length ? `<div class="oe-attention-head"><span>Severity</span><span>Item</span><span>Context</span><span>Detected</span></div>${attention.map((finding) => `<button class="oe-attention-row" type="button" data-oe-finding="${oeEsc(finding.finding_id)}"><span>${badge(finding.severity || "info", tone(finding.severity))}</span><span><strong>${oeEsc(finding.display_name || finding.entity_id || "Finding")}</strong><small>${oeEsc(finding.summary || finding.diagnosis || "Evidence-linked operational finding")}</small></span><span>${oeEsc(typeLabel(finding.semantic_type))}</span><span>${oeEsc(relativeTime(finding.last_seen))}</span></button>`).join("")}` : `<div class="oe-empty-state"><strong>No unresolved findings in current evaluations</strong><p>This remains bounded by published evidence coverage.</p></div>`;
+  }
+  const pathsLoaded = oeState.pathEstateRevisionId === currentEstateRevisionId();
+  oe$("oeAffectedPaths").innerHTML = pathsLoaded
+    ? (oeState.paths.slice(0, 4).map((trace, index) => {
+      const scope = routeScope(trace);
+      const current = scope.listener.time_scope === "current" && scope.corroboration.some((item) => item?.time_scope === "current" && item?.independently_corroborated === true);
+      return `<button class="oe-context-row" type="button" data-oe-path-index="${index}"><span><strong>${oeEsc(trace.source?.display_name || "Source")} → ${oeEsc(trace.target?.display_name || "Destination")}</strong><small>${current ? "Current runtime boundary supported" : "Runtime boundary incomplete"}</small></span>${badge("Qualified", "good")}</button>`;
+    }).join("") || `<div class="oe-empty-state"><p>No qualified service paths in the current projection.</p></div>`)
+    : `<div class="oe-loading">Loading qualified paths without blocking Operations…</div>`;
   const gaps = unresolved?.unresolved || [];
-  oe$("oeKnowledgeLimits").innerHTML = gaps.slice(0, 4).map((gap) => `<div class="oe-context-row"><span><strong>${oeEsc(gap.vendor_value || gap.expected_target_type || "Unresolved reference")}</strong><small>${oeEsc(gap.reason || "Evidence-backed mapping is incomplete")}</small></span>${badge(gap.state || "unknown", "warn")}</div>`).join("") || `<div class="oe-empty-state"><strong>No unresolved references returned in this slice</strong><p>Published operational coverage gaps: ${Number(operations?.current_coverage_gaps || 0).toLocaleString()}.</p></div>`;
+  oe$("oeKnowledgeLimits").innerHTML = gaps.slice(0, 4).map((gap) => `<div class="oe-context-row"><span><strong>${oeEsc(gap.vendor_value || gap.expected_target_type || "Unresolved reference")}</strong><small>${oeEsc(gap.reason || "Evidence-backed mapping is incomplete")}</small></span>${badge(gap.state || "unknown", "warn")}</div>`).join("") || `<div class="oe-empty-state"><strong>No unresolved references returned in this slice</strong><p>${published ? `Published operational coverage gaps: ${Number(operations?.current_coverage_gaps || 0).toLocaleString()}.` : "Operational coverage is unknown because no current evaluation source is published."}</p></div>`;
 }
 
 function renderPaths() {
   const select = oe$("oePathSelect");
   if (!select) return;
+  const loadMore = oe$("oeLoadMorePaths");
+  if (loadMore) loadMore.hidden = oeState.pathNextOffset == null;
   if (!oeState.paths.length) {
     select.innerHTML = `<option>No qualified file-transfer paths</option>`;
     select.disabled = true;
-    oe$("oePathFocus").innerHTML = `<div class="oe-empty-state"><strong>No qualified paths available</strong><p>The canonical estate does not currently expose a qualified file-transfer path.</p></div>`;
+    oe$("oePathFocus").innerHTML = `<div class="oe-empty-state"><strong>No qualified paths available</strong><p>The current canonical estate does not expose a qualified file-transfer path.</p></div>`;
     oe$("oePathDetails").innerHTML = "";
     oe$("oePathEvidenceBody").innerHTML = "";
     return;
@@ -284,15 +337,16 @@ function renderPaths() {
   const target = trace.target?.display_name || "EFT Site";
   const pnc = scope.runtime.endpoint || "PNC boundary";
   const runtimeSources = scope.sourceKinds.length ? scope.sourceKinds.join(" + ") : "runtime source unavailable";
-  oe$("oePathFocus").innerHTML = `<div class="oe-path-head"><div><span>Path</span><h3>${oeEsc(source)} → ${oeEsc(target)}</h3><p>${oeEsc(trace.explanation || "Evidence-qualified topology path")}</p></div><div>${badge("Qualified", "good")} ${badge(`${oeState.pathGaps.length} mapping gap${oeState.pathGaps.length === 1 ? "" : "s"}`, oeState.pathGaps.length ? "warn" : "good")}</div></div><div class="oe-path-lane">${pathNode("Access context", source, scope.siteAccess.time_scope === "historical" ? "Historical" : "Unknown", scope.siteAccess.time_scope === "historical" ? "Observed Site-access window retained" : "Site-access evidence not classified", scope.siteAccess.time_scope === "historical" ? "info" : "warn")}<div class="oe-path-arrow">→</div>${pathNode("DMZ listener", scope.listener.endpoint || "Listener endpoint", listenerCurrent ? "Current" : "Unknown", String(scope.gateway), listenerCurrent ? "good" : "warn")}<div class="oe-path-arrow">→</div>${pathNode("PNC boundary", pnc, pncCurrent ? "Corroborated" : "Unknown", runtimeSources, pncCurrent ? "good" : "warn")}<div class="oe-path-arrow">→</div>${pathNode("EFT Site", target, "Topology destination", "Canonical endpoint; traversal is not implied", "info")}</div><div class="oe-path-actions"><button class="oe-button" data-oe-open-evidence>Inspect route evidence</button><button class="oe-button ghost" data-oe-nav="investigations">Related findings</button></div>`;
-  oe$("oePathDetails").innerHTML = `<div class="oe-path-detail-grid"><div><span>Source</span><strong>${oeEsc(source)}</strong></div><div><span>Destination</span><strong>${oeEsc(target)}</strong></div><div><span>Topology</span><strong>${oeEsc(semantics.derived_epistemic || "qualified")}</strong></div><div><span>Runtime boundary</span><strong>${listenerCurrent && pncCurrent ? "current" : "incomplete"}</strong></div><div><span>Transfer completion</span><strong>${oeEsc(String(completion).replaceAll("_", " "))}</strong></div><div><span>Canonical gaps</span><strong>${oeState.pathGaps.length.toLocaleString()}</strong></div></div>`;
+  const pathGaps = Array.isArray(trace.unresolved) ? trace.unresolved : [];
+  oe$("oePathFocus").innerHTML = `<div class="oe-path-head"><div><span>Path</span><h3>${oeEsc(source)} → ${oeEsc(target)}</h3><p>${oeEsc(trace.explanation || "Evidence-qualified topology path")}</p></div><div>${badge("Qualified", "good")} ${badge(`${pathGaps.length} path gap${pathGaps.length === 1 ? "" : "s"}`, pathGaps.length ? "warn" : "good")}</div></div><div class="oe-path-lane">${pathNode("Access context", source, scope.siteAccess.time_scope === "historical" ? "Historical" : "Unknown", scope.siteAccess.time_scope === "historical" ? "Observed Site-access window retained" : "Site-access evidence not classified", scope.siteAccess.time_scope === "historical" ? "info" : "warn")}<div class="oe-path-arrow">→</div>${pathNode("DMZ listener", scope.listener.endpoint || "Listener endpoint", listenerCurrent ? "Current" : "Unknown", String(scope.gateway), listenerCurrent ? "good" : "warn")}<div class="oe-path-arrow">→</div>${pathNode("PNC boundary", pnc, pncCurrent ? "Corroborated" : "Unknown", runtimeSources, pncCurrent ? "good" : "warn")}<div class="oe-path-arrow">→</div>${pathNode("EFT Site", target, "Topology destination", "Canonical endpoint; traversal is not implied", "info")}</div><div class="oe-path-actions"><button class="oe-button" data-oe-open-evidence>Inspect route evidence</button><button class="oe-button ghost" data-oe-nav="investigations">Related findings</button></div>`;
+  oe$("oePathDetails").innerHTML = `<div class="oe-path-detail-grid"><div><span>Source</span><strong>${oeEsc(source)}</strong></div><div><span>Destination</span><strong>${oeEsc(target)}</strong></div><div><span>Topology</span><strong>${oeEsc(semantics.derived_epistemic || "qualified")}</strong></div><div><span>Runtime boundary</span><strong>${listenerCurrent && pncCurrent ? "current" : "incomplete"}</strong></div><div><span>Transfer completion</span><strong>${oeEsc(String(completion).replaceAll("_", " "))}</strong></div><div><span>Path-scoped gaps</span><strong>${pathGaps.length.toLocaleString()}</strong></div></div>`;
   const rows = [
     ["Site activity", scope.siteAccess.time_scope || "unknown", scope.siteAccess.activity_window_start || "No start", scope.siteAccess.activity_window_end || "No end"],
     ["Listener", listenerCurrent ? "current observed" : "unknown", scope.listener.endpoint || "No endpoint", String(scope.gateway)],
     ["PNC boundary", pncCurrent ? "current corroborated" : "unknown", pnc, runtimeSources],
     ["Transfer outcome", String(completion).replaceAll("_", " "), "Independent from route qualification", "No transaction animation or implied success"],
   ];
-  oe$("oePathEvidenceBody").innerHTML = `<div class="oe-evidence-table">${rows.map(([name, state, a, b]) => `<div><span>${oeEsc(name)}</span><strong>${oeEsc(state)}</strong><small>${oeEsc(a)} · ${oeEsc(b)}</small></div>`).join("")}</div>`;
+  oe$("oePathEvidenceBody").innerHTML = `<div class="oe-evidence-table">${rows.map(([name, state, a, b]) => `<div><span>${oeEsc(name)}</span><strong>${oeEsc(state)}</strong><small>${oeEsc(a)} · ${oeEsc(b)}</small></div>`).join("")}</div>${pathGaps.length ? `<div class="oe-rows">${pathGaps.map((gap) => `<div class="oe-context-row"><span><strong>${oeEsc(gap.vendor_value || gap.expected_target_type || "Unresolved")}</strong><small>${oeEsc(gap.reason || "Path mapping evidence is incomplete")}</small></span>${badge(gap.state || "unknown", "warn")}</div>`).join("")}</div>` : ""}`;
 }
 
 function exploreChips(summary) {
@@ -303,10 +357,16 @@ function exploreChips(summary) {
 }
 
 async function runExplore() {
+  const sequence = ++oeState.exploreSequence;
+  const query = oeState.exploreQuery;
+  const semanticType = oeState.exploreType;
   const params = new URLSearchParams({ limit: "25", offset: "0" });
-  if (oeState.exploreQuery) params.set("q", oeState.exploreQuery);
-  if (oeState.exploreType) params.set("semantic_type", oeState.exploreType);
+  if (query) params.set("q", query);
+  if (semanticType) params.set("semantic_type", semanticType);
+  const results = oe$("oeExploreResults");
+  if (results) results.innerHTML = `<div class="oe-loading">Searching canonical estate…</div>`;
   const data = await oeApi(`/api/v2/estate/current/entities?${params}`);
+  if (sequence !== oeState.exploreSequence || query !== oeState.exploreQuery || semanticType !== oeState.exploreType) return;
   oeState.exploreResults = data.entities || [];
   oeState.exploreTotal = Number(data.page?.total || oeState.exploreResults.length);
   renderExplore();
@@ -319,7 +379,9 @@ function renderExplore() {
 }
 
 async function selectExploreEntity(entityId) {
-  const detail = await oeApi(`/api/v2/estate/current/entities/${encodeURIComponent(entityId)}?relation_limit=40`);
+  const requestedId = String(entityId || "");
+  const detail = await oeApi(`/api/v2/estate/current/entities/${encodeURIComponent(requestedId)}?relation_limit=40`);
+  if (String(detail.entity?.entity_id || "") !== requestedId) return;
   oeState.exploreSelected = detail;
   renderExplore();
   const entity = detail.entity || {};
@@ -329,20 +391,26 @@ async function selectExploreEntity(entityId) {
 }
 
 function investigationQueueMarkup() {
+  const published = operationalPublished();
   const total = oeState.findingTotals.open + oeState.findingTotals.acknowledged;
-  return `<div class="oe-page-head"><div><h2>Investigations</h2><p>Choose one evidence-linked problem and carry only its relevant context forward.</p></div><button class="oe-button ghost" data-oe-refresh="investigations">Refresh</button></div><div class="oe-metrics oe-metrics-3">${metric("Open", oeState.findingTotals.open.toLocaleString(), "Current findings", oeState.findingTotals.open ? "danger" : "good", "△")}${metric("Acknowledged", oeState.findingTotals.acknowledged.toLocaleString(), "Still current", "info", "●")}${metric("Review queue", total.toLocaleString(), "Paginated; nothing silently hidden", "neutral", "≡")}</div><section class="oe-panel"><div class="oe-section-head"><div><h3>Investigation queue</h3><p>Severity first, then recency.</p></div></div><div id="oeFindingQueue" class="oe-finding-queue"></div><div id="oeFindingLoadMore" class="oe-load-more"></div></section>`;
+  return `<div class="oe-page-head"><div><h2>Investigations</h2><p>Choose one evidence-linked problem and carry only its relevant context forward.</p></div><button class="oe-button ghost" data-oe-refresh="investigations">Refresh</button></div><div class="oe-metrics oe-metrics-3">${metric("Open", published ? oeState.findingTotals.open.toLocaleString() : "Unknown", published ? "Current findings" : "No operational evaluation", published ? (oeState.findingTotals.open ? "danger" : "good") : "warn", "△")}${metric("Acknowledged", published ? oeState.findingTotals.acknowledged.toLocaleString() : "Unknown", published ? "Still current" : "No operational evaluation", published ? "info" : "warn", "●")}${metric("Review queue", published ? total.toLocaleString() : "Unknown", published ? "Paginated; nothing silently hidden" : "No current evaluation source", "neutral", "≡")}</div><section class="oe-panel"><div class="oe-section-head"><div><h3>Investigation queue</h3><p>Severity first, then recency.</p></div></div><div id="oeFindingQueue" class="oe-finding-queue"></div><div id="oeFindingLoadMore" class="oe-load-more"></div></section>`;
 }
 
 function renderFindingQueue() {
   const root = oe$("oeInvestigationRoot");
   if (!root) return;
   root.innerHTML = investigationQueueMarkup();
-  oe$("oeFindingQueue").innerHTML = oeState.findings.length ? oeState.findings.map((finding) => `<button class="oe-finding-row" type="button" data-oe-finding="${oeEsc(finding.finding_id)}"><span>${badge(finding.severity || "info", tone(finding.severity))}</span><span><strong>${oeEsc(finding.display_name || finding.entity_id)}</strong><small>${oeEsc(finding.summary || finding.diagnosis || "Evidence-linked finding")}</small></span><span>${oeEsc(finding.status || "OPEN")}<small>${oeEsc(relativeTime(finding.last_seen))}</small></span><span>Focus →</span></button>`).join("") : `<div class="oe-empty-state"><strong>No current findings</strong><p>Absence of findings is bounded by published evidence coverage.</p></div>`;
+  if (!operationalPublished()) {
+    oe$("oeFindingQueue").innerHTML = `<div class="oe-empty-state"><strong>Investigation queue is unknown</strong><p>No current operational evaluation source is published, so zero findings cannot be treated as an evaluated estate.</p></div>`;
+    oe$("oeFindingLoadMore").innerHTML = "";
+    return;
+  }
+  oe$("oeFindingQueue").innerHTML = oeState.findings.length ? oeState.findings.map((finding) => `<button class="oe-finding-row" type="button" data-oe-finding="${oeEsc(finding.finding_id)}"><span>${badge(finding.severity || "info", tone(finding.severity))}</span><span><strong>${oeEsc(finding.display_name || finding.entity_id)}</strong><small>${oeEsc(finding.summary || finding.diagnosis || "Evidence-linked finding")}</small></span><span>${oeEsc(finding.status || "OPEN")}<small>${oeEsc(relativeTime(finding.last_seen))}</small></span><span>Focus →</span></button>`).join("") : `<div class="oe-empty-state"><strong>No current findings</strong><p>Absence of findings is bounded by the published operational evaluation coverage.</p></div>`;
   oe$("oeFindingLoadMore").innerHTML = oeState.findingHasMore ? `<button class="oe-button ghost" data-oe-load-findings>Load more findings</button>` : "";
 }
 
 async function fetchFindingPage(reset = false) {
-  if (oeState.findingLoading) return;
+  if (oeState.findingLoading || !operationalPublished()) return;
   oeState.findingLoading = true;
   try {
     if (reset) { oeState.findings = []; oeState.findingOffset = 0; oeState.findingHasMore = false; }
@@ -360,15 +428,33 @@ async function fetchFindingPage(reset = false) {
   } finally { oeState.findingLoading = false; }
 }
 
+function clearFocusedFinding() {
+  oeState.focusedFindingId = null;
+  oeState.focusedFinding = null;
+  oeState.focusedRelatedFindings = [];
+  oeState.focusedTab = "overview";
+  try { sessionStorage.removeItem("osi.oe.focus"); } catch {}
+}
+
 async function focusFinding(id) {
   oeState.focusedFindingId = id;
   oeState.focusedTab = "overview";
   try { sessionStorage.setItem("osi.oe.focus", id); } catch {}
-  const detail = await oeApi(`/api/v2/findings/current/${encodeURIComponent(id)}`);
-  oeState.focusedFinding = detail;
-  const entityId = detail.finding?.entity_id;
-  oeState.focusedRelatedFindings = entityId ? (await oeApi(`/api/v2/findings/current?entity_id=${encodeURIComponent(entityId)}&limit=20&offset=0`)).findings?.filter((item) => item.finding_id !== id) || [] : [];
-  renderFocusedInvestigation();
+  try {
+    const detail = await oeApi(`/api/v2/findings/current/${encodeURIComponent(id)}`);
+    oeState.focusedFinding = detail;
+    const entityId = detail.finding?.entity_id;
+    oeState.focusedRelatedFindings = entityId ? (await oeApi(`/api/v2/findings/current?entity_id=${encodeURIComponent(entityId)}&limit=20&offset=0`)).findings?.filter((item) => item.finding_id !== id) || [] : [];
+    renderFocusedInvestigation();
+  } catch (error) {
+    if (error?.status === 404) {
+      clearFocusedFinding();
+      if (!oeState.findings.length && operationalPublished()) await fetchFindingPage(true);
+      renderFindingQueue();
+      return;
+    }
+    throw error;
+  }
 }
 
 function noteKey(id) { return `osi.oe.notes.${id}`; }
@@ -430,47 +516,87 @@ function renderCollection() {
   const { estateStatus, estateSummary, operations, importStatus, telemetry } = oeState.core || {};
   if (!estateStatus) return;
   const estate = estateStatus.current_estate || {};
-  oe$("oeCollectionMetrics").innerHTML = [metric("Semantic sources", Number(importStatus.current_sources || 0).toLocaleString(), "Current source revisions", Number(importStatus.current_sources || 0) ? "good" : "warn", "▣"), metric("Estate freshness", estateStatus.estate_fresh ? "Current" : "Stale", `${Number(estate.entity_count || 0).toLocaleString()} entities`, estateStatus.estate_fresh ? "good" : "danger", "●"), metric("Operational findings", Number(operations.current_findings || 0).toLocaleString(), `${Number(operations.current_observations || 0).toLocaleString()} observations`, "info", "◇"), metric("Unresolved mappings", Number(estate.unresolved_count || 0).toLocaleString(), "Canonical references", Number(estate.unresolved_count || 0) ? "warn" : "good", "?"), metric("Telemetry ingress", telemetry.ingress_enabled ? "Enabled" : "Disabled", telemetry.mode || "mode unknown", telemetry.ingress_enabled ? "good" : "neutral", "↯")].join("");
+  const published = operationalPublished();
+  oe$("oeCollectionMetrics").innerHTML = [
+    metric("Semantic sources", Number(importStatus.current_sources || 0).toLocaleString(), "Current source revisions", Number(importStatus.current_sources || 0) ? "good" : "warn", "▣"),
+    metric("Estate freshness", estateStatus.estate_fresh ? "Current" : "Stale", `${Number(estate.entity_count || 0).toLocaleString()} entities`, estateStatus.estate_fresh ? "good" : "danger", "●"),
+    metric("Operational findings", published ? Number(operations.current_findings || 0).toLocaleString() : "Unknown", published ? `${Number(operations.current_observations || 0).toLocaleString()} observations` : "No operational evaluation published", published ? "info" : "warn", "◇"),
+    metric("Unresolved mappings", Number(estate.unresolved_count || 0).toLocaleString(), "Canonical references", Number(estate.unresolved_count || 0) ? "warn" : "good", "?"),
+    metric("Telemetry ingress", telemetry.ingress_enabled ? "Enabled" : "Disabled", telemetry.mode || "mode unknown", telemetry.ingress_enabled ? "good" : "neutral", "↯"),
+  ].join("");
   const domains = domainRollup(estateSummary);
   const max = Math.max(1, ...domains.map(([, count]) => count));
   oe$("oeDomainTable").innerHTML = `<div class="oe-domain-head"><span>Domain</span><span>Observed entities</span><span>Relative volume</span></div>${domains.map(([name, count]) => `<div class="oe-domain-row"><strong>${oeEsc(name)}</strong><span>${count.toLocaleString()}</span><span><i style="width:${Math.max(8, Math.round((count / max) * 100))}%"></i></span></div>`).join("")}`;
-  oe$("oeCollectionBoundary").innerHTML = `<div class="oe-boundary-list"><div>${badge(estateStatus.estate_fresh ? "Current estate" : "Stale estate", estateStatus.estate_fresh ? "good" : "danger")}<p>Canonical estate freshness says the current source set has been reconciled; it does not prove runtime health.</p></div><div>${badge(`${Number(operations.current_coverage_gaps || 0)} published coverage gaps`, Number(operations.current_coverage_gaps || 0) ? "warn" : "good")}<p>Zero published gaps is bounded by the operational evaluation sources that exist.</p></div><div>${badge(`${Number(estate.unresolved_count || 0)} unresolved`, Number(estate.unresolved_count || 0) ? "warn" : "good")}<p>Unknown canonical relationships remain unknown rather than being converted into outages or healthy state.</p></div><div>${badge(telemetry.ingress_enabled ? "Telemetry enabled" : "Telemetry disabled", telemetry.ingress_enabled ? "good" : "neutral")}<p>${oeEsc(telemetry.mode || "Telemetry mode unknown")}.</p></div></div>`;
+  const coverageLabel = published ? `${Number(operations.current_coverage_gaps || 0)} published coverage gaps` : "Coverage unknown";
+  const coverageTone = published ? (Number(operations.current_coverage_gaps || 0) ? "warn" : "good") : "warn";
+  const coverageText = published ? "Published gap count is bounded by the operational evaluation sources that exist." : "No current operational evaluation is published; zero gaps would not mean complete coverage.";
+  oe$("oeCollectionBoundary").innerHTML = `<div class="oe-boundary-list"><div>${badge(estateStatus.estate_fresh ? "Current estate" : "Stale estate", estateStatus.estate_fresh ? "good" : "danger")}<p>Canonical estate freshness says the current source set has been reconciled; it does not prove runtime health.</p></div><div>${badge(coverageLabel, coverageTone)}<p>${oeEsc(coverageText)}</p></div><div>${badge(`${Number(estate.unresolved_count || 0)} unresolved`, Number(estate.unresolved_count || 0) ? "warn" : "good")}<p>Unknown canonical relationships remain unknown rather than being converted into outages or healthy state.</p></div><div>${badge(telemetry.ingress_enabled ? "Telemetry enabled" : "Telemetry disabled", telemetry.ingress_enabled ? "good" : "neutral")}<p>${oeEsc(telemetry.mode || "Telemetry mode unknown")}.</p></div></div>`;
 }
 
 async function refreshView(view) {
   polishShell();
   try {
     if (!oeState.core) await loadCore();
-    if (["overview", "routes", "investigations"].includes(view)) await ensurePaths();
-    if (view === "overview") renderOperations();
-    if (view === "routes") renderPaths();
+    if (view === "overview") {
+      renderOperations();
+      if (oeState.pathEstateRevisionId !== currentEstateRevisionId() && !oeState.pathPromise) {
+        void ensurePaths().then(() => renderOperations()).catch(() => {
+          const target = oe$("oeAffectedPaths");
+          if (target) target.innerHTML = `<div class="oe-empty-state"><strong>Qualified paths unavailable</strong><p>Open Paths to retry this bounded read.</p></div>`;
+        });
+      }
+      return;
+    }
+    if (view === "routes") {
+      await ensurePaths();
+      renderPaths();
+      return;
+    }
     if (view === "inventory") {
       if (!oeState.exploreSummary) oeState.exploreSummary = await oeApi("/api/v2/estate/current/summary");
       if (!oeState.exploreResults.length) await runExplore(); else renderExplore();
+      return;
     }
     if (view === "investigations") {
+      await ensurePaths();
       if (oeState.focusedFindingId) {
         if (!oeState.focusedFinding) await focusFinding(oeState.focusedFindingId); else renderFocusedInvestigation();
       } else {
-        if (!oeState.findings.length) await fetchFindingPage(true);
+        if (!oeState.findings.length && operationalPublished()) await fetchFindingPage(true);
         renderFindingQueue();
       }
+      return;
     }
     if (view === "snapshots") renderCollection();
   } catch (error) {
     const screen = document.querySelector(`[data-view-panel="${view}"] .oe-screen`);
-    if (screen) screen.innerHTML = `<div class="oe-empty-state error"><strong>Unable to load this workspace</strong><p>${oeEsc(error instanceof Error ? error.message : String(error))}</p></div>`;
+    if (screen) screen.innerHTML = `<div class="oe-empty-state error"><strong>Unable to load this workspace</strong><p>${oeEsc(error instanceof Error ? error.message : String(error))}</p><button class="oe-button ghost" data-oe-refresh="${oeEsc(view)}">Retry</button></div>`;
   }
 }
 
 function navigate(view) { window.osiNavigateProduct?.(view); }
+
+function resetCoreAndRevisionCaches() {
+  const previousRevision = currentEstateRevisionId();
+  oeState.core = null;
+  oeState.exploreSummary = null;
+  oeState.exploreSelected = null;
+  if (previousRevision) {
+    oeState.pathEstateRevisionId = null;
+    oeState.paths = [];
+    oeState.pathTotal = 0;
+    oeState.pathNextOffset = null;
+    oeState.pathPromise = null;
+    oeState.selectedPath = 0;
+  }
+}
 
 function handleClick(event) {
   const nav = event.target.closest("[data-oe-nav]");
   if (nav) { navigate(nav.dataset.oeNav); return; }
   const refresh = event.target.closest("[data-oe-refresh]");
   if (refresh) {
-    oeState.core = null;
+    resetCoreAndRevisionCaches();
     if (refresh.dataset.oeRefresh === "investigations") { oeState.findings = []; oeState.findingOffset = 0; oeState.focusedFinding = null; }
     void refreshView(refresh.dataset.oeRefresh);
     return;
@@ -480,16 +606,17 @@ function handleClick(event) {
   const finding = event.target.closest("[data-oe-finding]");
   if (finding) { navigate("investigations"); setTimeout(() => void focusFinding(finding.dataset.oeFinding), 30); return; }
   const type = event.target.closest("[data-oe-type]");
-  if (type) { oeState.exploreType = type.dataset.oeType || ""; void runExplore(); return; }
+  if (type) { oeState.exploreType = type.dataset.oeType || ""; oeState.exploreSelected = null; void runExplore(); return; }
   const entity = event.target.closest("[data-oe-entity]");
   if (entity) { void selectExploreEntity(entity.dataset.oeEntity); return; }
   const inspect = event.target.closest("[data-oe-inspect-entity]");
   if (inspect) { navigate("inventory"); setTimeout(() => void selectExploreEntity(inspect.dataset.oeInspectEntity), 50); return; }
   if (event.target.closest("[data-oe-open-evidence]")) { const details = oe$("oePathEvidence"); if (details) { details.open = true; details.scrollIntoView({ behavior: "smooth", block: "start" }); } return; }
   if (event.target.closest("[data-oe-route-advanced]")) { document.querySelector('[data-view-panel="routes"]')?.classList.toggle("oe-show-legacy-route"); return; }
+  if (event.target.closest("[data-oe-load-paths]")) { void loadMorePaths(); return; }
   const history = event.target.closest("[data-oe-collection-history]");
   if (history) { document.querySelector('[data-view-panel="snapshots"]')?.classList.toggle("oe-show-legacy-collection"); history.textContent = history.textContent.includes("Show") ? "Hide collection history" : "Show collection history"; return; }
-  if (event.target.closest("[data-oe-back-findings]")) { oeState.focusedFindingId = null; oeState.focusedFinding = null; oeState.focusedRelatedFindings = []; try { sessionStorage.removeItem("osi.oe.focus"); } catch {} renderFindingQueue(); return; }
+  if (event.target.closest("[data-oe-back-findings]")) { clearFocusedFinding(); renderFindingQueue(); return; }
   const tab = event.target.closest("[data-oe-investigation-tab]");
   if (tab) { oeState.focusedTab = tab.dataset.oeInvestigationTab; renderFocusedInvestigation(); return; }
   if (event.target.closest("[data-oe-load-findings]")) { void fetchFindingPage(false).then(renderFindingQueue); return; }
@@ -506,6 +633,7 @@ function handleSubmit(event) {
   if (event.target?.id !== "oeExploreForm") return;
   event.preventDefault();
   oeState.exploreQuery = oe$("oeExploreInput")?.value.trim() || "";
+  oeState.exploreSelected = null;
   void runExplore();
 }
 
