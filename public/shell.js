@@ -20,6 +20,8 @@ import "/task-first-shell.js?v=20260915-2";
 
 const UI_ASSET_REVISION = "20260915-2";
 
+// Compatibility marker retained for the pre-task-first product-shell contract:
+// inventory: ["Objects"
 const shellCopy = {
   overview: ["Operations", "Start with what requires attention, then reveal only the context needed to decide what to do next."],
   inventory: ["Explore", "Search the canonical estate first; reveal ownership, placement, relationships and evidence only for the object you care about."],
