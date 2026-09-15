@@ -1,5 +1,6 @@
 import { handleIntegratedRoutes } from "./integrated-routes";
 import { handleOperationalFindings } from "./operational-findings";
+import { activeSituationPage } from "./operator-situations";
 import { handleSemanticEstate } from "./semantic-estate";
 import { handleSemanticEstateRead } from "./semantic-estate-read";
 import { handleSemanticImport } from "./semantic-import";
@@ -230,13 +231,14 @@ function projectQualifiedPath(trace: JsonMap, compact = false) {
 }
 
 async function overview(request: Request, env: OperatorReadModelEnv): Promise<Response> {
-  const [estateStatus, operations, openFindings, acknowledgedFindings, unresolved, paths] = await Promise.all([
+  const [estateStatus, operations, openFindings, acknowledgedFindings, unresolved, paths, situations] = await Promise.all([
     callJson(request, "/api/v2/estate/status", handleSemanticEstate, estateEnv(env), "Estate status"),
     callJson(request, "/api/v2/operations/status", handleOperationalFindings, estateEnv(env), "Operations status"),
     callJson(request, "/api/v2/findings/current?status=OPEN&limit=6&offset=0", handleOperationalFindings, estateEnv(env), "Open findings"),
     callJson(request, "/api/v2/findings/current?status=ACKNOWLEDGED&limit=6&offset=0", handleOperationalFindings, estateEnv(env), "Acknowledged findings"),
     callJson(request, "/api/v2/estate/current/unresolved?limit=4&offset=0", handleSemanticEstateRead, semanticEnv(env), "Unresolved references"),
     callJson(request, "/api/v2/routes/qualified?domain=file_transfer&limit=4&offset=0", handleIntegratedRoutes, semanticEnv(env), "Qualified paths"),
+    activeSituationPage(env.DB, 6, 0),
   ]);
 
   const estate = estateStatus.current_estate ?? {};
@@ -260,10 +262,15 @@ async function overview(request: Request, env: OperatorReadModelEnv): Promise<Re
       published,
       open_findings: published ? Number(openFindings.page?.total || 0) : null,
       acknowledged_findings: published ? Number(acknowledgedFindings.page?.total || 0) : null,
+      active_situations: published ? situations.total : null,
       observations: published ? Number(operations.current_observations || 0) : null,
       coverage_gaps: published ? Number(operations.current_coverage_gaps || 0) : null,
     },
     attention,
+    situations: {
+      total: published ? situations.total : null,
+      items: published ? situations.items : [],
+    },
     paths: {
       total: Number(paths.page?.total || 0),
       items: Array.isArray(paths.routes) ? paths.routes.map((trace: JsonMap) => projectQualifiedPath(trace, true)) : [],
@@ -318,22 +325,33 @@ async function explore(request: Request, env: OperatorReadModelEnv): Promise<Res
   const semanticType = textParam(url, "semantic_type", 200);
   const limit = Math.max(1, integerParam(url, "limit", 25, 50));
   const offset = integerParam(url, "offset", 0, MAX_OFFSET);
+  const summary = await callJson(request, "/api/v2/estate/current/summary", handleSemanticEstateRead, semanticEnv(env), "Estate summary");
+  const filters = {
+    total_entities: Number(summary.counts?.entities || 0),
+    semantic_types: preferredExploreTypes(summary),
+  };
+  if (!q && !semanticType) {
+    return reply({
+      schema_version: "osi.operator.explore/v1",
+      estate: summary.estate ?? null,
+      mode: "entry",
+      query: { q: "", semantic_type: null },
+      page: { total: 0, limit, offset: 0, next_offset: null },
+      filters,
+      items: [],
+    });
+  }
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (q) params.set("q", q);
   if (semanticType) params.set("semantic_type", semanticType);
-  const [summary, entities] = await Promise.all([
-    callJson(request, "/api/v2/estate/current/summary", handleSemanticEstateRead, semanticEnv(env), "Estate summary"),
-    callJson(request, `/api/v2/estate/current/entities?${params.toString()}`, handleSemanticEstateRead, semanticEnv(env), "Estate search"),
-  ]);
+  const entities = await callJson(request, `/api/v2/estate/current/entities?${params.toString()}`, handleSemanticEstateRead, semanticEnv(env), "Estate search");
   return reply({
     schema_version: "osi.operator.explore/v1",
     estate: summary.estate ?? entities.estate ?? null,
+    mode: "results",
     query: { q, semantic_type: semanticType || null },
     page: entities.page ?? { total: 0, limit, offset, next_offset: null },
-    filters: {
-      total_entities: Number(summary.counts?.entities || 0),
-      semantic_types: preferredExploreTypes(summary),
-    },
+    filters,
     items: entities.entities ?? [],
   });
 }
@@ -436,6 +454,43 @@ async function investigations(request: Request, env: OperatorReadModelEnv): Prom
     page: { total, limit, offset, next_offset: offset + items.length < total ? offset + items.length : null },
     counts,
     items,
+  });
+}
+
+async function situations(request: Request, env: OperatorReadModelEnv): Promise<Response> {
+  const url = new URL(request.url);
+  const limit = Math.max(1, integerParam(url, "limit", 20, 50));
+  const offset = integerParam(url, "offset", 0, MAX_OFFSET);
+  const operations = await callJson(request, "/api/v2/operations/status", handleOperationalFindings, estateEnv(env), "Operations status");
+  const published = operationalPublished(operations);
+  if (!published) {
+    return reply({
+      schema_version: "osi.operator.situations/v1",
+      published: false,
+      page: { total: null, limit, offset, next_offset: null },
+      counts: { situations: null, open_findings: null, acknowledged_findings: null },
+      items: [],
+    });
+  }
+  const [findingCounts, situationPage] = await Promise.all([
+    activeFindingCounts(env.DB),
+    activeSituationPage(env.DB, limit, offset),
+  ]);
+  return reply({
+    schema_version: "osi.operator.situations/v1",
+    published: true,
+    page: {
+      total: situationPage.total,
+      limit,
+      offset,
+      next_offset: offset + situationPage.items.length < situationPage.total ? offset + situationPage.items.length : null,
+    },
+    counts: {
+      situations: situationPage.total,
+      open_findings: findingCounts.open,
+      acknowledged_findings: findingCounts.acknowledged,
+    },
+    items: situationPage.items,
   });
 }
 
@@ -543,6 +598,13 @@ async function collection(request: Request, env: OperatorReadModelEnv): Promise<
         detail: "Canonical estate freshness means the current source set has been reconciled; it does not prove runtime health.",
       },
       {
+        state: published ? `${Number(operations.current_findings || 0)} current findings` : "Operational evaluation unavailable",
+        kind: published ? "neutral" : "warn",
+        detail: published
+          ? `${Number(operations.current_observations || 0)} observations support the currently published operational evaluation; these counts are secondary evidence volume, not collection health.`
+          : "No current operational evaluation is published, so operational attention and coverage cannot be treated as evaluated.",
+      },
+      {
         state: published ? `${Number(operations.current_coverage_gaps || 0)} published coverage gaps` : "Coverage unknown",
         kind: published ? (Number(operations.current_coverage_gaps || 0) ? "warn" : "good") : "warn",
         detail: published
@@ -572,6 +634,7 @@ export async function handleOperatorReadModel(request: Request, env: OperatorRea
     if (path === "/api/v2/operator/paths") return await paths(request, env);
     if (path === "/api/v2/operator/explore") return await explore(request, env);
     if (path === "/api/v2/operator/investigations") return await investigations(request, env);
+    if (path === "/api/v2/operator/situations") return await situations(request, env);
     if (path === "/api/v2/operator/collection") return await collection(request, env);
 
     const exploreMatch = path.match(/^\/api\/v2\/operator\/explore\/([^/]+)$/);
