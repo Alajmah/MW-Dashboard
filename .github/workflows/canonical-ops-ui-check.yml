@@ -39,7 +39,8 @@ jobs:
           css = Path("public/canonical-ops.css").read_text()
 
           required = [
-              'import "/canonical-ops.js?v=',
+              'async function ensureForensicSupport()',
+              'import(`/canonical-ops.js?v=${UI_ASSET_REVISION}`)',
               '"Physical middleware hosts and confirmed queue-manager placement.',
               'window.osiRenderCanonicalServers',
               'window.osiRenderQmgrLedger',
@@ -56,6 +57,8 @@ jobs:
           if missing:
               raise SystemExit(f"canonical operations UI contract missing: {missing}")
 
+          if 'import "/canonical-ops.js?v=' in shell:
+              raise SystemExit("Canonical operations support must not be eagerly loaded by the primary operator shell")
           if '/api/v1/topology/current' in ops:
               raise SystemExit("canonical operational UI must not load the legacy full graph")
           if 'fetchCanonicalType("infra.network_endpoint")' in ops:
