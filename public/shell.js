@@ -1,5 +1,5 @@
 import "/product-shell.js?v=20260910-1";
-import "/task-first-shell.js?v=20260915-4";
+import "/task-first-shell.js?v=20260915-5";
 import "/operator-experience.js?v=20260915-3";
 
 const UI_ASSET_REVISION = "20260915-6";
