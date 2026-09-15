@@ -47,11 +47,27 @@ The browser no longer decides whether an unobserved estate is healthy, derives r
 - explicit requests for bounded operator read models;
 - optional progressive disclosure into retained forensic/engineering views.
 
-`public/task-first-shell.js` is structural only. It owns the five-item primary navigation, canonical-search affordance, and the investigation panel container. It does not fetch operational data or derive operator meaning.
+`public/task-first-shell.js` owns the structural operator shell plus the shared inspection navigation context. Its responsibilities are limited to the five-item primary navigation, canonical-search affordance, investigation panel container, and session-scoped anchors for the finding, canonical entity, or path the operator is following. It does not fetch operational data, infer relationships, qualify routes, or derive operator meaning.
 
 `public/shell.js` keeps the primary operator path small. Only the product shell, task-first structural shell, and operator renderer are eager modules. Older forensic, route-trace, collection-history, and administration modules are lazy-loaded only after an explicit operator action requests those deeper tools.
 
-Session-local notes and checklist state are not persisted as incident/case data and do not mutate canonical or operational state.
+Session-local notes, checklist state, and shared inspection context are not persisted as incident/case data and do not mutate canonical or operational state.
+
+## Shared inspection context
+
+Operators should not have to reconstruct their mental context after every pivot. The task-first shell therefore carries a bounded browser-session inspection context across **Operations → Paths → Explore → Investigations → proof/evidence**.
+
+The shared context may retain only navigation anchors already exposed by the rendered operator experience:
+
+- current `finding_id` and its display label;
+- current canonical `entity_id` and its display label;
+- current path selection index/display label for restoring the path workspace within the same browser session.
+
+Multiple anchors may coexist so that, for example, an operator can move from a finding to its canonical object and still return to the investigation. The most recently selected anchor is the primary focus shown in the shell.
+
+This context is intentionally **not evidence**. It does not create a relationship between anchors, does not assert that a finding belongs to a path, does not convert a selected path into a transaction claim, and does not survive beyond browser-session storage. When an anchor is reopened, the destination workspace revalidates it against its normal read model.
+
+The context bar therefore communicates: *what the operator is following*, not *what OSI has proven*.
 
 ## Evidence and epistemic boundaries
 
