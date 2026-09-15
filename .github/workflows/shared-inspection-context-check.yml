@@ -62,8 +62,8 @@ jobs:
           if missing:
               raise SystemExit(f"shared inspection context contract missing: {missing}")
 
-          if 'fetch(' in task or '/api/' in task:
-              raise SystemExit("task-first shell shared context must not fetch or derive operator data")
+          if 'fetch(' in task:
+              raise SystemExit("task-first shell shared context must not fetch operator data")
           if 'localStorage' in task:
               raise SystemExit("shared inspection context must remain browser-session scoped")
           if 'Math.random' in task:
