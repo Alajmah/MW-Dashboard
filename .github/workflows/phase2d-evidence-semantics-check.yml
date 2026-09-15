@@ -31,10 +31,14 @@ jobs:
       - name: JavaScript syntax
         run: node --check public/phase2d-evidence-semantics.js && node --check public/shell.js
 
-      - name: Verify shell integration
+      - name: Verify lazy forensic wiring
         run: |
-          grep -Fq 'import "/phase2d-evidence-semantics.js?v=' public/shell.js
-          grep -Fq 'window.osiRefreshEvidenceSemantics?.();' public/shell.js
+          grep -Fq 'async function ensureForensicSupport()' public/shell.js
+          grep -Fq 'import(`/phase2d-evidence-semantics.js?v=${UI_ASSET_REVISION}`)' public/shell.js
+          if grep -Fq 'import "/phase2d-evidence-semantics.js?v=' public/shell.js; then
+            echo 'Phase 2D must not be eagerly loaded by the primary operator shell.' >&2
+            exit 1
+          fi
 
       - name: Verify evidence semantics
         run: |
