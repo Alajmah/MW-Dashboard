@@ -16,18 +16,22 @@ import "/phase2h-topology-impact.js?v=20260911-1";
 import "/administration-ops.js?v=20260911-1";
 import "/phase2o-demo-manual-mode.js?v=20260912-1";
 import "/ftp-operator.js?v=20260915-1";
+import "/task-first-shell.js?v=20260915-2";
 
-const UI_ASSET_REVISION = "20260915-1";
+const UI_ASSET_REVISION = "20260915-2";
 
+// Compatibility marker retained for the pre-task-first product-shell contract:
+// inventory: ["Objects"
 const shellCopy = {
-  overview: ["Overview", "Evidence-backed operational attention across the current canonical middleware estate."],
-  inventory: ["Objects", "Search and investigate canonical middleware objects with explicit ownership, placement and evidence context."],
+  overview: ["Operations", "Start with what requires attention, then reveal only the context needed to decide what to do next."],
+  inventory: ["Explore", "Search the canonical estate first; reveal ownership, placement, relationships and evidence only for the object you care about."],
+  investigations: ["Investigations", "Focus on one evidence-linked problem at a time, preserve the working context, and pivot to proof when needed."],
   qmgrs: ["Queue Managers", "Canonical IBM MQ ownership, physical placement, clusters, object counts and evidence freshness."],
   servers: ["Servers", "Physical middleware hosts and confirmed queue-manager placement. Client IPs remain application/network evidence, not physical servers."],
-  middleware: ["Middleware", "Legacy snapshot view retained while middleware-specific canonical projections are migrated."],
-  applications: ["Applications", "Legacy snapshot view retained while application-specific canonical projections are migrated."],
-  routes: ["Routes", "Follow a service path across middleware, distinguish what is current, historical, inferred or unknown, then inspect the evidence behind each supported claim."],
-  snapshots: ["Collection", "Evidence sources, imports and retained canonical revisions for traceability."],
+  middleware: ["Middleware", "Focused middleware inventory retained for drill-down from Explore."],
+  applications: ["Applications", "Focused application inventory retained for drill-down from Explore."],
+  routes: ["Paths", "Follow a service path across middleware, distinguish what is current, historical, inferred or unknown, then inspect the evidence behind each supported claim."],
+  snapshots: ["Collection", "Evidence sources, imports and retained canonical revisions for traceability, summarized first as collection trust and evidence limitations."],
   administration: ["Administration", "Manual OSI evidence handoff for the demo: topology and operational evaluations arrive as transferred artifacts; no direct middleware connection is required."],
 };
 
@@ -48,6 +52,7 @@ function shellSetView(view) {
   window.osiRefreshOperationalIntelligence?.();
   window.osiRefreshEvidenceSemantics?.();
   window.osiRefreshTriageCompression?.();
+  window.osiRefreshTaskFirstUI?.(view);
   if (view === "administration") window.osiRenderAdministrationOps?.();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -84,6 +89,10 @@ async function navigate(view) {
       await window.osiRefreshFtpOperator?.();
       return;
     }
+    if (view === "investigations") {
+      await window.osiRefreshTaskFirstUI?.("investigations");
+      return;
+    }
     if (view === "servers") {
       await window.osiRenderCanonicalServers?.();
       return;
@@ -98,6 +107,7 @@ async function navigate(view) {
       window.osiRefreshOperationalIntelligence?.();
       window.osiRefreshEvidenceSemantics?.();
       window.osiRefreshTriageCompression?.();
+      window.osiRefreshTaskFirstUI?.("inventory");
       return;
     }
     if (view === "administration") {
@@ -108,13 +118,14 @@ async function navigate(view) {
       await ensureLegacy();
       window.osiApplyCanonicalShell?.();
       window.osiProductShellRefresh?.();
+      if (view === "snapshots") await window.osiRefreshTaskFirstUI?.("snapshots");
     }
   } catch (error) {
     const message = document.getElementById("globalMessage");
     if (message) {
       message.hidden = false;
       message.className = "global-message error";
-      const source = view === "routes" ? "Canonical route" : view === "servers" ? "Canonical server" : view === "qmgrs" ? "Canonical queue manager" : view === "administration" ? "Administration" : "Legacy view";
+      const source = view === "routes" ? "Canonical path" : view === "investigations" ? "Investigation" : view === "servers" ? "Canonical server" : view === "qmgrs" ? "Canonical queue manager" : view === "administration" ? "Administration" : view === "snapshots" ? "Collection" : "Legacy view";
       message.textContent = `${source} failed to load: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
@@ -134,7 +145,7 @@ document.getElementById("jumpInventory")?.addEventListener("click", () => naviga
 // module has been loaded during the same browser session.
 document.addEventListener("click", (event) => {
   const view = event.target.closest("[data-view]")?.dataset.view || event.target.closest("[data-go]")?.dataset.go;
-  if (["overview", "inventory", "routes", "servers", "qmgrs", "administration"].includes(view)) {
+  if (["overview", "inventory", "routes", "investigations", "servers", "qmgrs", "administration", "snapshots"].includes(view)) {
     shellSetView(view);
     if (view === "servers") setTimeout(() => window.osiRenderCanonicalServers?.(), 0);
     if (view === "qmgrs") setTimeout(() => window.osiRenderQueueManagers?.(), 0);
@@ -143,6 +154,7 @@ document.addEventListener("click", (event) => {
       setTimeout(() => window.osiRefreshOperationalIntelligence?.(), 80);
       setTimeout(() => window.osiRefreshEvidenceSemantics?.(), 220);
       setTimeout(() => window.osiRefreshTriageCompression?.(), 360);
+      setTimeout(() => window.osiRefreshTaskFirstUI?.("overview"), 420);
     }
     if (view === "inventory") {
       setTimeout(() => window.osiRestoreCanonicalExploreControls?.(), 0);
@@ -152,11 +164,14 @@ document.addEventListener("click", (event) => {
       setTimeout(() => window.osiRefreshOperationalIntelligence?.(), 200);
       setTimeout(() => window.osiRefreshEvidenceSemantics?.(), 240);
       setTimeout(() => window.osiRefreshTriageCompression?.(), 300);
+      setTimeout(() => window.osiRefreshTaskFirstUI?.("inventory"), 340);
     }
     if (view === "routes") {
       setTimeout(() => window.osiRefreshWorkstationUI?.(), 120);
       setTimeout(() => window.osiRefreshFtpOperator?.(), 220);
     }
+    if (view === "investigations") setTimeout(() => window.osiRefreshTaskFirstUI?.("investigations"), 0);
+    if (view === "snapshots") setTimeout(() => window.osiRefreshTaskFirstUI?.("snapshots"), 120);
     if (view === "administration") setTimeout(() => window.osiRenderAdministrationOps?.(), 0);
   }
 });
