@@ -38,7 +38,7 @@ The browser no longer decides whether an unobserved estate is healthy, derives r
 
 ## Public layer responsibilities
 
-`public/operator-experience.js` should remain limited to presentation concerns:
+`public/operator-experience.js` is limited to presentation concerns:
 
 - DOM rendering and responsive disclosure;
 - navigation and selected item/filter/tab state;
@@ -46,6 +46,10 @@ The browser no longer decides whether an unobserved estate is healthy, derives r
 - browser-session-only investigation checklist and notes;
 - explicit requests for bounded operator read models;
 - optional progressive disclosure into retained forensic/engineering views.
+
+`public/task-first-shell.js` is structural only. It owns the five-item primary navigation, canonical-search affordance, and the investigation panel container. It does not fetch operational data or derive operator meaning.
+
+`public/shell.js` keeps the primary operator path small. Only the product shell, task-first structural shell, and operator renderer are eager modules. Older forensic, route-trace, collection-history, and administration modules are lazy-loaded only after an explicit operator action requests those deeper tools.
 
 Session-local notes and checklist state are not persisted as incident/case data and do not mutate canonical or operational state.
 
@@ -64,4 +68,4 @@ This architecture does not change OSI's evidence contract.
 
 Existing canonical, route, findings, collection, and administration APIs remain available for forensic and administrative workflows. Existing advanced route and collection-history views remain behind explicit progressive disclosure. The operator read model is additive and read-only.
 
-Future public-layer reduction should continue by lazy-loading forensic modules only when the operator requests them. That optimization is separate from semantic ownership: the first requirement is that primary task screens no longer reconstruct domain meaning in the browser.
+The public-layer reduction is therefore both semantic and runtime: primary task screens consume bounded operator projections, while engineering-oriented modules are deferred until the operator deliberately asks for them. This keeps the everyday application path small without deleting the deeper forensic capabilities required for proof and administration.
