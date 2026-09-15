@@ -40,7 +40,8 @@ jobs:
           combined = js + "\n" + css + "\n" + shell
 
           required = [
-              'import "/workstation-ui.js?v=20260910-1"',
+              'async function ensureForensicSupport()',
+              'import(`/workstation-ui.js?v=${UI_ASSET_REVISION}`)',
               'MAX_COMPARE = 3',
               'osi.compare.v1',
               'estateId: workstationState.estateId',
@@ -68,6 +69,8 @@ jobs:
           if missing:
               raise SystemExit(f"Workstation UI contract missing: {missing}")
 
+          if 'import "/workstation-ui.js?v=' in shell:
+              raise SystemExit("Workstation support must not be eagerly loaded by the primary operator shell")
           if '/api/v1/topology/current' in js:
               raise SystemExit("Workstation UI must remain canonical-only")
 
