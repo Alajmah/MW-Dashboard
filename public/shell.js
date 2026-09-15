@@ -29,7 +29,7 @@ const shellCopy = {
   middleware: ["Middleware", "Focused middleware inventory retained for drill-down from Explore."],
   applications: ["Applications", "Focused application inventory retained for drill-down from Explore."],
   routes: ["Paths", "Follow a service path across middleware, distinguish what is current, historical, inferred or unknown, then inspect the evidence behind each supported claim."],
-  snapshots: ["Collection", "Understand source freshness, estate currency and evidence limitations before opening collection history."],
+  snapshots: ["Collection", "Evidence sources, imports and retained canonical revisions for traceability, summarized first as collection trust and evidence limitations."],
   administration: ["Administration", "Manual OSI evidence handoff for the demo: topology and operational evaluations arrive as transferred artifacts; no direct middleware connection is required."],
 };
 
