@@ -40,7 +40,8 @@ jobs:
           combined = js + "\n" + css + "\n" + shell
 
           required = [
-              'import "/wave1-shell-cleanup.js?v=20260910-1"',
+              'async function ensureForensicSupport()',
+              'import(`/wave1-shell-cleanup.js?v=${UI_ASSET_REVISION}`)',
               'Open Queue Managers',
               'action.dataset.go = "qmgrs"',
               'ACE workspace — awaiting evidence source',
@@ -60,6 +61,8 @@ jobs:
           if missing:
               raise SystemExit(f"Wave 1 shell consistency contract missing: {missing}")
 
+          if 'import "/wave1-shell-cleanup.js?v=' in shell:
+              raise SystemExit("Wave 1 support must not be eagerly loaded by the primary operator shell")
           if '/api/v1/topology/current' in js:
               raise SystemExit("Wave 1 shell search must remain canonical-only")
           if 'Math.random' in js:
