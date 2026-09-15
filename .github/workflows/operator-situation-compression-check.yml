@@ -1,0 +1,88 @@
+name: Operator situation compression check
+
+on:
+  pull_request:
+    paths:
+      - "src/operator-situations.ts"
+      - "src/operator-read-model.ts"
+      - "public/operator-experience.js"
+      - "public/operator-experience.css"
+      - "public/shell.js"
+      - "docs/phase-operator-read-model.md"
+      - ".github/workflows/operator-situation-compression-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/operator-situations.ts"
+      - "src/operator-read-model.ts"
+      - "public/operator-experience.js"
+      - "public/operator-experience.css"
+      - "public/shell.js"
+      - "docs/phase-operator-read-model.md"
+      - ".github/workflows/operator-situation-compression-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check Worker
+        run: npm run check
+
+      - name: JavaScript syntax
+        run: node --check public/operator-experience.js && node --check public/shell.js
+
+      - name: Situation compression contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          situations = Path("src/operator-situations.ts").read_text()
+          read_model = Path("src/operator-read-model.ts").read_text()
+          ui = Path("public/operator-experience.js").read_text()
+          css = Path("public/operator-experience.css").read_text()
+          shell = Path("public/shell.js").read_text()
+          doc = Path("docs/phase-operator-read-model.md").read_text()
+          combined = "\n".join([situations, read_model, ui, css, shell, doc])
+
+          required = [
+              "activeSituationPage",
+              "COUNT(DISTINCT entity_id)",
+              "PARTITION BY entity_id",
+              "rule_id",
+              "/api/v2/operator/situations",
+              "osi.operator.situations/v1",
+              'mode: "entry"',
+              "Attention situations",
+              "data-oe-situation",
+              "Operational path",
+              'import "/operator-experience.js?v=20260915-4"',
+              "Operational situation",
+              "not a new canonical entity",
+              "does not assert that they share a root cause",
+          ]
+          missing = [item for item in required if item not in combined]
+          if missing:
+              raise SystemExit(f"operator situation compression contract missing: {missing}")
+
+          if 'Math.random' in combined:
+              raise SystemExit("operator experience must not fabricate situation state")
+          if 'groupBy' in ui or 'reduce((situ' in ui:
+              raise SystemExit("public operator layer must consume server-projected situations instead of grouping raw findings")
+          if 'qualified service path' in ui.lower() or 'service paths' in ui.lower():
+              raise SystemExit("primary operator UI must use operational-path language unless canonical service identity exists")
+          if css.count('{') != css.count('}'):
+              raise SystemExit("operator-experience.css has unbalanced braces")
+          if 'url(http://' in css or 'url(https://' in css or '@import url(' in css:
+              raise SystemExit("operator UI must not depend on external visual assets")
+
+          print("Operator situation compression contract OK")
