@@ -40,12 +40,16 @@ jobs:
           grep -Fq 'ADMIN_IMPORT_TOKEN' public/administration-ops.js
           grep -Fq 'window.osiRefreshOperationalIntelligence' public/administration-ops.js
 
-      - name: Prevent legacy Administration importer ownership
+      - name: Preserve Administration ownership behind explicit navigation
         run: |
-          grep -Fq 'import "/administration-ops.js' public/shell.js
-          grep -Fq 'return ["middleware", "applications", "snapshots"].includes(view);' public/shell.js
+          grep -Fq 'async function ensureAdministration()' public/shell.js
+          grep -Fq 'import(`/administration-ops.js?v=${UI_ASSET_REVISION}`)' public/shell.js
           grep -Fq 'if (view === "administration") {' public/shell.js
           grep -Fq 'window.osiRenderAdministrationOps?.();' public/shell.js
+          if grep -Fq 'import "/administration-ops.js' public/shell.js; then
+            echo 'Administration must not be eagerly loaded by the primary operator shell.' >&2
+            exit 1
+          fi
 
       - name: Verify credential handling boundary
         run: |
