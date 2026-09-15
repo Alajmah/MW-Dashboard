@@ -43,7 +43,8 @@ jobs:
           combined = shell + "\n" + js + "\n" + routes + "\n" + css
 
           required = [
-              'import "/acceptance-ui.js?v=',
+              'async function ensureForensicSupport()',
+              'import(`/acceptance-ui.js?v=${UI_ASSET_REVISION}`)',
               'UI_ASSET_REVISION',
               'import(`/routes-estate.js?v=${UI_ASSET_REVISION}`)',
               'aria-autocomplete',
@@ -74,6 +75,8 @@ jobs:
           if missing:
               raise SystemExit(f"UI acceptance contract missing: {missing}")
 
+          if 'import "/acceptance-ui.js?v=' in shell:
+              raise SystemExit("Acceptance/forensic enhancements must not be eagerly loaded by the primary operator shell")
           if '/api/v1/topology/current' in js:
               raise SystemExit("acceptance UI must not reintroduce legacy full-graph loading")
 
@@ -87,5 +90,20 @@ jobs:
 
           if '#view-routes .route-workbench{position:relative!important;overflow:visible!important' not in css:
               raise SystemExit("route workbench must own an overflow-visible stacking context")
+
+          eager_prefixes = [
+              'import "/canonical-ops.js?v=',
+              'import "/acceptance-ui.js?v=',
+              'import "/explore-investigation.js?v=',
+              'import "/workstation-ui.js?v=',
+              'import "/phase2d-evidence-semantics.js?v=',
+              'import "/phase2e-triage-compression.js?v=',
+              'import "/phase2f-investigation-bootstrap.js?v=',
+              'import "/phase2g-investigation-clarity.js?v=',
+              'import "/operational-intelligence.js?v=',
+          ]
+          present = [item for item in eager_prefixes if item in shell]
+          if present:
+              raise SystemExit(f"Primary operator shell eagerly loads forensic modules: {present}")
 
           print("UI acceptance contract OK")
