@@ -1,4 +1,4 @@
-const OE_REVISION = "20260915-3";
+const OE_REVISION = "20260915-4";
 
 const oeState = {
   overview: null,
@@ -7,14 +7,15 @@ const oeState = {
   selectedPath: 0,
   exploreQuery: "",
   exploreType: "",
+  exploreMode: "entry",
   exploreItems: [],
   explorePage: { total: 0 },
   exploreFilters: { total_entities: 0, semantic_types: [] },
   exploreSelected: null,
   exploreSequence: 0,
-  investigations: [],
-  investigationPage: { total: null, next_offset: null },
-  investigationCounts: { open: null, acknowledged: null },
+  situations: [],
+  situationPage: { total: null, next_offset: null },
+  situationCounts: { situations: null, open_findings: null, acknowledged_findings: null },
   investigationPublished: false,
   investigationLoading: false,
   focusedFindingId: null,
@@ -138,40 +139,51 @@ function ensureScreen(view, id, markup) {
 
 function installScreens() {
   ensureScreen("overview", "oeOperations", `
-    <div class="oe-page-head"><div><h2>Operations</h2><p>A focused view of what needs attention across the evidence-backed estate.</p></div><button class="oe-button ghost" data-oe-refresh="overview">Refresh</button></div>
+    <div class="oe-page-head"><div><h2>Operations</h2><p>Start with the operational situations that deserve attention; reveal individual findings only when you investigate.</p></div><button class="oe-button ghost" data-oe-refresh="overview">Refresh</button></div>
     <div id="oeOpsMetrics" class="oe-metrics oe-metrics-4"><div class="oe-loading">Reading operational state…</div></div>
-    <section class="oe-panel"><div class="oe-section-head"><div><h3>Operational attention</h3><p>Highest-priority current findings only.</p></div><button class="oe-link" data-oe-nav="investigations">Review all findings</button></div><div id="oeAttentionTable"></div></section>
+    <section class="oe-panel"><div class="oe-section-head"><div><h3>Situations requiring attention</h3><p>Related findings are compressed around the canonical object they describe.</p></div><button class="oe-link" data-oe-nav="investigations">Review situations</button></div><div id="oeAttentionTable"></div></section>
     <div class="oe-grid-2">
-      <section class="oe-panel"><div class="oe-section-head"><div><h3>Affected paths</h3><p>Qualified service paths and their current evidence boundaries.</p></div><button class="oe-link" data-oe-nav="routes">Open Paths</button></div><div id="oeAffectedPaths" class="oe-rows"></div></section>
-      <section class="oe-panel"><div class="oe-section-head"><div><h3>Knowledge limitations</h3><p>Unknowns that constrain interpretation.</p></div></div><div id="oeKnowledgeLimits" class="oe-rows"></div></section>
+      <section class="oe-panel"><div class="oe-section-head"><div><h3>Affected paths</h3><p>Qualified operational paths and their current evidence boundaries.</p></div><button class="oe-link" data-oe-nav="routes">Open Paths</button></div><div id="oeAffectedPaths" class="oe-rows"></div></section>
+      <section class="oe-panel"><div class="oe-section-head"><div><h3>Knowledge limitations</h3><p>Unknown mappings that constrain interpretation.</p></div></div><div id="oeKnowledgeLimits" class="oe-rows"></div></section>
     </div>`);
 
   ensureScreen("routes", "oePaths", `
-    <div class="oe-page-head"><div><h2>Paths</h2><p>Follow an evidence-backed service path without turning topology into a transaction claim.</p></div><button class="oe-button ghost" data-oe-route-advanced>Advanced trace</button></div>
-    <section class="oe-panel oe-path-selector-panel"><label><span>Select a qualified service path</span><select id="oePathSelect"><option>Loading paths…</option></select></label><div class="oe-head-actions"><button id="oeLoadMorePaths" class="oe-button ghost" data-oe-load-paths hidden>Load more</button><button class="oe-button ghost" data-oe-nav="investigations">View findings</button></div></section>
-    <section id="oePathFocus" class="oe-panel"><div class="oe-loading">Loading qualified paths…</div></section>
-    <section class="oe-panel"><div class="oe-section-head"><div><h3>Path details</h3><p>Compact topology facts for the selected path.</p></div></div><div id="oePathDetails"></div></section>
+    <div class="oe-page-head"><div><h2>Paths</h2><p>Follow an evidence-backed operational path without turning topology into a transaction claim.</p></div><button class="oe-button ghost" data-oe-route-advanced>Advanced trace</button></div>
+    <section class="oe-panel oe-path-selector-panel"><label><span>Select a qualified operational path</span><select id="oePathSelect"><option>Loading paths…</option></select></label><div class="oe-head-actions"><button id="oeLoadMorePaths" class="oe-button ghost" data-oe-load-paths hidden>Load more</button><button class="oe-button ghost" data-oe-nav="investigations">View situations</button></div></section>
+    <section id="oePathFocus" class="oe-panel oe-path-primary"><div class="oe-loading">Loading qualified paths…</div></section>
+    <section class="oe-panel oe-path-facts"><div class="oe-section-head"><div><h3>Path facts</h3><p>Compact topology facts; proof stays behind disclosure.</p></div></div><div id="oePathDetails"></div></section>
     <details id="oePathEvidence" class="oe-panel oe-evidence-disclosure"><summary>Inspect route evidence</summary><div id="oePathEvidenceBody"></div></details>`);
 
   ensureScreen("inventory", "oeExplore", `
-    <div class="oe-page-head"><div><h2>Explore</h2><p>Search the canonical estate, then reveal detail only for the object you care about.</p></div></div>
-    <form id="oeExploreForm" class="oe-explore-search"><span>⌕</span><input id="oeExploreInput" type="search" autocomplete="off" placeholder="Search names or canonical identities…"><button class="oe-button" type="submit">Search</button></form>
+    <div class="oe-page-head"><div><h2>Explore</h2><p>Search the canonical estate first. Do not browse hundreds of objects unless a task requires it.</p></div></div>
+    <form id="oeExploreForm" class="oe-explore-search"><span>⌕</span><input id="oeExploreInput" type="search" autocomplete="off" placeholder="Search an object, host, queue, path, or canonical identity…"><button class="oe-button" type="submit">Search</button></form>
     <div id="oeExploreChips" class="oe-filter-chips"></div>
-    <div class="oe-explore-layout">
-      <section class="oe-panel"><div class="oe-section-head"><div><h3 id="oeExploreCount">Results</h3><p>25 results per query to keep scanning manageable.</p></div></div><div id="oeExploreResults" class="oe-result-list"><div class="oe-loading">Loading canonical entities…</div></div></section>
-      <aside class="oe-panel oe-object-inspector"><div id="oeExploreDetail" class="oe-empty-state"><strong>Select an object</strong><p>Overview, relationships and evidence appear here.</p></div></aside>
+    <div id="oeExploreLayout" class="oe-explore-layout entry">
+      <section class="oe-panel"><div class="oe-section-head"><div><h3 id="oeExploreCount">Start with search or a type</h3><p id="oeExploreHint">Choose the smallest useful slice of the canonical estate.</p></div></div><div id="oeExploreResults" class="oe-result-list"><div class="oe-loading">Reading estate entry points…</div></div></section>
+      <aside class="oe-panel oe-object-inspector"><div id="oeExploreDetail" class="oe-empty-state"><strong>Select an object</strong><p>Identity, relationships and evidence appear here.</p></div></aside>
     </div>`);
 
   ensureScreen("investigations", "oeInvestigations", `<div id="oeInvestigationRoot"><div class="oe-loading">Loading investigation workspace…</div></div>`);
 
   ensureScreen("snapshots", "oeCollection", `
-    <div class="oe-page-head"><div><h2>Collection</h2><p>Understand data trust, evidence freshness and collection limits without equating collection with health.</p></div><div class="oe-head-actions"><button class="oe-button ghost" data-oe-nav="administration">Import evidence</button><button class="oe-button ghost" data-oe-refresh="snapshots">Refresh</button></div></div>
-    <div id="oeCollectionMetrics" class="oe-metrics oe-metrics-5"><div class="oe-loading">Reading evidence state…</div></div>
+    <div class="oe-page-head"><div><h2>Collection</h2><p>Can I trust what OSI currently knows? Start with source freshness and interpretation limits, not raw observation volume.</p></div><div class="oe-head-actions"><button class="oe-button ghost" data-oe-nav="administration">Import evidence</button><button class="oe-button ghost" data-oe-refresh="snapshots">Refresh</button></div></div>
+    <div id="oeCollectionMetrics" class="oe-metrics oe-metrics-4"><div class="oe-loading">Reading evidence state…</div></div>
     <div class="oe-grid-collection">
-      <section class="oe-panel"><div class="oe-section-head"><div><h3>Evidence domains</h3><p>Observed canonical entities by technology/domain. These bars are volume, not health or completeness percentages.</p></div></div><div id="oeDomainTable"></div></section>
+      <section class="oe-panel"><div class="oe-section-head"><div><h3>Evidence domains</h3><p>Observed canonical entities by technology/domain. Volume is not health or completeness.</p></div></div><div id="oeDomainTable"></div></section>
       <section class="oe-panel"><div class="oe-section-head"><div><h3>Interpretation boundary</h3><p>What the current collection can and cannot establish.</p></div></div><div id="oeCollectionBoundary"></div></section>
     </div>
     <button class="oe-link oe-history-link" data-oe-collection-history>Show collection history</button>`);
+}
+
+function situationSignals(situation) {
+  const mechanisms = Array.isArray(situation?.mechanisms) ? situation.mechanisms : [];
+  return mechanisms.slice(0, 3).map((item) => item.summary || item.rule_id).filter(Boolean);
+}
+
+function situationEvidenceLabel(situation) {
+  const count = Number(situation?.finding_count || 0);
+  const type = typeLabel(situation?.semantic_type);
+  return `${type} · ${count} finding${count === 1 ? "" : "s"}`;
 }
 
 function renderOperations() {
@@ -179,23 +191,28 @@ function renderOperations() {
   if (!data) return;
   const published = data.operations?.published === true;
   const estate = data.estate || {};
+  const situations = data.situations || { total: null, items: [] };
   const paths = data.paths || { total: 0, items: [] };
   const limitations = data.limitations || { total: 0, items: [] };
+  const findingTotal = published ? Number(data.operations.open_findings || 0) + Number(data.operations.acknowledged_findings || 0) : null;
   oe$("oeOpsMetrics").innerHTML = [
-    metric("Open findings", published ? Number(data.operations.open_findings || 0).toLocaleString() : "Unknown", published ? "Current evidence-linked items" : "No operational evaluation published", published ? (Number(data.operations.open_findings || 0) ? "danger" : "good") : "warn", "△"),
-    metric("Qualified paths", Number(paths.total || 0).toLocaleString(), "Evidence-backed file-transfer paths", Number(paths.total || 0) ? "info" : "neutral", "⌁"),
-    metric("Knowledge gaps", Number(estate.unresolved_count || 0).toLocaleString(), "Canonical unresolved references", Number(estate.unresolved_count || 0) ? "warn" : "good", "?"),
-    metric("Estate freshness", estate.fresh ? "Current" : "Stale", `${Number(estate.entity_count || 0).toLocaleString()} canonical entities`, estate.fresh ? "good" : "danger", "●"),
+    metric("Attention situations", published ? Number(situations.total || 0).toLocaleString() : "Unknown", published ? `${findingTotal.toLocaleString()} current findings grouped by object` : "No operational evaluation published", published ? (Number(situations.total || 0) ? "danger" : "good") : "warn", "△"),
+    metric("Qualified paths", Number(paths.total || 0).toLocaleString(), "Evidence-backed operational paths", "neutral", "⌁"),
+    metric("Unresolved mappings", Number(limitations.total || 0).toLocaleString(), "Canonical references that limit interpretation", Number(limitations.total || 0) ? "warn" : "neutral", "?"),
+    metric("Estate freshness", estate.fresh ? "Current" : "Stale", `${Number(estate.entity_count || 0).toLocaleString()} canonical entities`, estate.fresh ? "neutral" : "danger", "●"),
   ].join("");
 
-  const attention = Array.isArray(data.attention) ? data.attention : [];
+  const attention = Array.isArray(situations.items) ? situations.items : [];
   if (!published) {
-    oe$("oeAttentionTable").innerHTML = `<div class="oe-empty-state"><strong>Operational attention is unknown</strong><p>No current operational evaluation source is published. Zero findings must not be interpreted as healthy state.</p></div>`;
+    oe$("oeAttentionTable").innerHTML = `<div class="oe-empty-state"><strong>Operational attention is unknown</strong><p>No current operational evaluation source is published. Zero situations must not be interpreted as healthy state.</p></div>`;
   } else {
-    oe$("oeAttentionTable").innerHTML = attention.length ? `<div class="oe-attention-head"><span>Severity</span><span>Item</span><span>Context</span><span>Detected</span></div>${attention.map((finding) => `<button class="oe-attention-row" type="button" data-oe-finding="${oeEsc(finding.finding_id)}"><span>${badge(finding.severity || "info", tone(finding.severity))}</span><span><strong>${oeEsc(finding.display_name || finding.entity_id || "Finding")}</strong><small>${oeEsc(finding.summary || finding.diagnosis || "Evidence-linked operational finding")}</small></span><span>${oeEsc(typeLabel(finding.semantic_type))}</span><span>${oeEsc(relativeTime(finding.last_seen))}</span></button>`).join("")}` : `<div class="oe-empty-state"><strong>No unresolved findings in current evaluations</strong><p>This remains bounded by published evidence coverage.</p></div>`;
+    oe$("oeAttentionTable").innerHTML = attention.length ? `<div class="oe-attention-head"><span>Severity</span><span>Situation</span><span>Evidence</span><span>Updated</span></div>${attention.map((situation) => {
+      const signals = situationSignals(situation);
+      return `<button class="oe-attention-row oe-situation-row" type="button" data-oe-situation="${oeEsc(situation.situation_key)}" data-oe-finding="${oeEsc(situation.focus_finding_id)}"><span>${badge(situation.severity || "info", tone(situation.severity))}</span><span><strong>${oeEsc(situation.display_name || situation.entity_id || "Operational situation")}</strong><small>${oeEsc(signals.join(" · ") || "Current evidence-linked findings")}</small></span><span><strong>${oeEsc(situationEvidenceLabel(situation))}</strong><small>${oeEsc(Number(situation.acknowledged_findings || 0) ? `${Number(situation.acknowledged_findings || 0)} acknowledged` : "All current findings open")}</small></span><span>${oeEsc(relativeTime(situation.last_seen))}</span></button>`;
+    }).join("")}` : `<div class="oe-empty-state"><strong>No current situations require attention</strong><p>This remains bounded by published evidence coverage.</p></div>`;
   }
 
-  oe$("oeAffectedPaths").innerHTML = (paths.items || []).map((path, index) => `<button class="oe-context-row" type="button" data-oe-overview-path="${index}"><span><strong>${oeEsc(path.label)}</strong><small>${path.runtime_boundary === "current" ? "Current runtime boundary supported" : "Runtime boundary incomplete"}</small></span>${badge("Qualified", "good")}</button>`).join("") || `<div class="oe-empty-state"><p>No qualified service paths in the current projection.</p></div>`;
+  oe$("oeAffectedPaths").innerHTML = (paths.items || []).map((path, index) => `<button class="oe-context-row" type="button" data-oe-overview-path="${index}"><span><strong>${oeEsc(path.label)}</strong><small>${path.runtime_boundary === "current" ? "Current runtime boundary supported" : "Runtime boundary incomplete"}</small></span>${badge("Qualified", "good")}</button>`).join("") || `<div class="oe-empty-state"><p>No qualified operational paths in the current projection.</p></div>`;
   oe$("oeKnowledgeLimits").innerHTML = (limitations.items || []).map((gap) => `<div class="oe-context-row"><span><strong>${oeEsc(gap.vendor_value || gap.expected_target_type || "Unresolved reference")}</strong><small>${oeEsc(gap.reason || "Evidence-backed mapping is incomplete")}</small></span>${badge(gap.state || "unknown", "warn")}</div>`).join("") || `<div class="oe-empty-state"><strong>No unresolved references returned in this slice</strong><p>${published ? `${Number(data.operations.coverage_gaps || 0).toLocaleString()} published operational coverage gaps.` : "Operational coverage is unknown because no current evaluation source is published."}</p></div>`;
 }
 
@@ -220,7 +237,7 @@ function renderPaths() {
   select.disabled = false;
   select.innerHTML = oeState.paths.map((path, index) => `<option value="${index}"${index === oeState.selectedPath ? " selected" : ""}>${oeEsc(path.label)}</option>`).join("");
   const path = oeState.paths[oeState.selectedPath] || oeState.paths[0];
-  oe$("oePathFocus").innerHTML = `<div class="oe-path-head"><div><span>Path</span><h3>${oeEsc(path.label)}</h3><p>${oeEsc(path.explanation || "Evidence-qualified topology path")}</p></div><div>${badge("Qualified", "good")} ${badge(`${Number(path.gap_count || 0)} path gap${Number(path.gap_count || 0) === 1 ? "" : "s"}`, Number(path.gap_count || 0) ? "warn" : "good")}</div></div><div class="oe-path-lane">${(path.nodes || []).map((node, index) => `${index ? `<div class="oe-path-arrow">→</div>` : ""}${pathNode(node)}`).join("")}</div><div class="oe-path-actions"><button class="oe-button" data-oe-open-evidence>Inspect route evidence</button><button class="oe-button ghost" data-oe-nav="investigations">Related findings</button></div>`;
+  oe$("oePathFocus").innerHTML = `<div class="oe-path-head"><div><span>Operational path</span><h3>${oeEsc(path.label)}</h3><p>${oeEsc(path.explanation || "Evidence-qualified topology path")}</p></div><div>${badge("Qualified", "good")} ${badge(`${Number(path.gap_count || 0)} path gap${Number(path.gap_count || 0) === 1 ? "" : "s"}`, Number(path.gap_count || 0) ? "warn" : "neutral")}</div></div><div class="oe-path-lane">${(path.nodes || []).map((node, index) => `${index ? `<div class="oe-path-arrow">→</div>` : ""}${pathNode(node)}`).join("")}</div><div class="oe-path-actions"><button class="oe-button" data-oe-open-evidence>Inspect route evidence</button><button class="oe-button ghost" data-oe-nav="investigations">Related situations</button></div>`;
   oe$("oePathDetails").innerHTML = `<div class="oe-path-detail-grid">${(path.details || []).map((item) => `<div><span>${oeEsc(item.label)}</span><strong>${oeEsc(item.value)}</strong></div>`).join("")}</div>`;
   oe$("oePathEvidenceBody").innerHTML = `<div class="oe-evidence-table">${(path.evidence || []).map((item) => `<div><span>${oeEsc(item.label)}</span><strong>${oeEsc(item.state)}</strong><small>${oeEsc(item.detail)}</small></div>`).join("")}</div>${(path.gaps || []).length ? `<div class="oe-rows">${path.gaps.map((gap) => `<div class="oe-context-row"><span><strong>${oeEsc(gap.vendor_value || gap.expected_target_type || "Unresolved")}</strong><small>${oeEsc(gap.reason || "Path mapping evidence is incomplete")}</small></span>${badge(gap.state || "unknown", "warn")}</div>`).join("")}</div>` : ""}`;
 }
@@ -246,9 +263,10 @@ async function runExplore() {
   const params = new URLSearchParams({ limit: "25", offset: "0" });
   if (oeState.exploreQuery) params.set("q", oeState.exploreQuery);
   if (oeState.exploreType) params.set("semantic_type", oeState.exploreType);
-  oe$("oeExploreResults").innerHTML = `<div class="oe-loading">Searching canonical estate…</div>`;
+  oe$("oeExploreResults").innerHTML = `<div class="oe-loading">Reading the relevant estate slice…</div>`;
   const data = await oeApi(`/api/v2/operator/explore?${params.toString()}`);
   if (sequence !== oeState.exploreSequence) return;
+  oeState.exploreMode = data.mode || (oeState.exploreQuery || oeState.exploreType ? "results" : "entry");
   oeState.exploreItems = data.items || [];
   oeState.explorePage = data.page || { total: oeState.exploreItems.length };
   oeState.exploreFilters = data.filters || { total_entities: 0, semantic_types: [] };
@@ -257,12 +275,25 @@ async function runExplore() {
 }
 
 function renderExplore() {
+  const isEntry = oeState.exploreMode === "entry" && !oeState.exploreQuery && !oeState.exploreType;
   oe$("oeExploreChips").innerHTML = exploreChips().map((chip) => {
     const type = chip.semantic_type || "";
-    return `<button type="button" class="oe-chip${type === oeState.exploreType ? " active" : ""}" data-oe-type="${oeEsc(type)}">${oeEsc(type ? typeLabel(type) : "All types")} <span>${Number(chip.count || 0).toLocaleString()}</span></button>`;
+    const label = type ? typeLabel(type) : "All estate";
+    return `<button type="button" class="oe-chip${type === oeState.exploreType ? " active" : ""}" data-oe-type="${oeEsc(type)}">${oeEsc(label)} <span>${Number(chip.count || 0).toLocaleString()}</span></button>`;
   }).join("");
+  oe$("oeExploreLayout")?.classList.toggle("entry", isEntry);
+  if (isEntry) {
+    oe$("oeExploreCount").textContent = "Start with search or a type";
+    oe$("oeExploreHint").textContent = `${Number(oeState.exploreFilters.total_entities || 0).toLocaleString()} canonical entities are available, but none are listed until you narrow the task.`;
+    const entryPoints = (oeState.exploreFilters.semantic_types || []).slice(0, 6);
+    oe$("oeExploreResults").innerHTML = `<div class="oe-explore-entry"><strong>Find the object you care about</strong><p>Search by name or canonical identity, or enter through a focused object type. OSI will reveal detail only after you choose a useful slice.</p><div class="oe-entry-grid">${entryPoints.map((item) => `<button type="button" data-oe-type="${oeEsc(item.semantic_type)}"><span>${oeEsc(typeLabel(item.semantic_type))}</span><strong>${Number(item.count || 0).toLocaleString()}</strong></button>`).join("")}</div></div>`;
+    oe$("oeExploreDetail").innerHTML = `<div class="oe-empty-state"><strong>Object detail appears after selection</strong><p>Canonical identity, relationships, sources and evidence remain one step behind search.</p></div>`;
+    return;
+  }
   oe$("oeExploreCount").textContent = `Results (${Number(oeState.explorePage?.total || 0).toLocaleString()})`;
-  oe$("oeExploreResults").innerHTML = oeState.exploreItems.length ? oeState.exploreItems.map((entity) => `<button class="oe-result-row${oeState.exploreSelected?.entity?.entity_id === entity.entity_id ? " active" : ""}" type="button" data-oe-entity="${oeEsc(entity.entity_id)}"><span class="oe-result-icon">${String(entity.semantic_type || "").startsWith("mq.") ? "▦" : String(entity.semantic_type || "").startsWith("filetransfer.") ? "⇄" : "◇"}</span><span><strong>${oeEsc(entity.display_name || entity.identity_key)}</strong><small>${oeEsc(typeLabel(entity.semantic_type))} · ${oeEsc((entity.evidence_classes || []).join(" · ") || "evidence unknown")}</small></span>${badge(entity.identity_state || "canonical", entity.identity_state === "conflicted" ? "warn" : "good")}</button>`).join("") : `<div class="oe-empty-state"><strong>No canonical entities match</strong><p>Adjust the search or semantic-type filter.</p></div>`;
+  oe$("oeExploreHint").textContent = "25 results per query; refine the search instead of scanning the estate.";
+  oe$("oeExploreResults").innerHTML = oeState.exploreItems.length ? oeState.exploreItems.map((entity) => `<button class="oe-result-row${oeState.exploreSelected?.entity?.entity_id === entity.entity_id ? " active" : ""}" type="button" data-oe-entity="${oeEsc(entity.entity_id)}"><span class="oe-result-icon">${String(entity.semantic_type || "").startsWith("mq.") ? "▦" : String(entity.semantic_type || "").startsWith("filetransfer.") ? "⇄" : "◇"}</span><span><strong>${oeEsc(entity.display_name || entity.identity_key)}</strong><small>${oeEsc(typeLabel(entity.semantic_type))} · ${oeEsc((entity.evidence_classes || []).join(" · ") || "evidence unknown")}</small></span>${badge(entity.identity_state || "canonical", entity.identity_state === "conflicted" ? "warn" : "neutral")}</button>`).join("") : `<div class="oe-empty-state"><strong>No canonical entities match</strong><p>Adjust the search or semantic-type filter.</p></div>`;
+  if (!oeState.exploreSelected) oe$("oeExploreDetail").innerHTML = `<div class="oe-empty-state"><strong>Select one result</strong><p>Identity, relationships and evidence will appear here without expanding every row.</p></div>`;
 }
 
 async function selectExploreEntity(entityId) {
@@ -272,12 +303,13 @@ async function selectExploreEntity(entityId) {
   const entity = detail.entity || {};
   const relations = detail.relations || [];
   const properties = entity.properties && typeof entity.properties === "object" ? Object.entries(entity.properties).slice(0, 8) : [];
-  oe$("oeExploreDetail").innerHTML = `<div class="oe-inspector-head"><span class="oe-result-icon large">◇</span><div><h3>${oeEsc(entity.display_name || entity.identity_key || "Entity")}</h3><p>${oeEsc(typeLabel(entity.semantic_type))}</p>${badge(entity.identity_state || "canonical", entity.identity_state === "conflicted" ? "warn" : "good")}</div></div><div class="oe-tabs"><button class="active" type="button">Overview</button><button type="button" disabled>Related (${Number(detail.presentation?.related_count || relations.length)})</button><button type="button" disabled>Evidence (${Number(detail.presentation?.evidence_count || 0)})</button></div><dl class="oe-inspector-facts"><div><dt>Canonical identity</dt><dd>${oeEsc(entity.identity_key || "—")}</dd></div><div><dt>Identity rule</dt><dd>${oeEsc(entity.identity_rule || "—")}</dd></div><div><dt>Observed</dt><dd>${oeEsc(relativeTime(entity.observed_at))}</dd></div><div><dt>Sources</dt><dd>${Number(detail.presentation?.source_count || 0).toLocaleString()}</dd></div><div><dt>Evidence classes</dt><dd>${oeEsc((entity.evidence_classes || []).join(", ") || "unknown")}</dd></div><div><dt>Relationships</dt><dd>${relations.length.toLocaleString()}</dd></div></dl>${properties.length ? `<div class="oe-inspector-section"><h4>Key properties</h4>${properties.map(([key, value]) => `<div class="oe-property-row"><span>${oeEsc(key)}</span><strong>${oeEsc(Array.isArray(value) ? value.join(", ") : typeof value === "object" ? JSON.stringify(value) : value)}</strong></div>`).join("")}</div>` : ""}<div class="oe-inspector-section"><h4>Related canonical entities</h4>${relations.slice(0, 6).map((relation) => `<div class="oe-property-row"><span>${oeEsc(relation.semantic_type)}</span><strong>${oeEsc(relation.source_entity_id === entity.entity_id ? relation.target_entity_id : relation.source_entity_id)}</strong></div>`).join("") || `<p>No relationships returned in this slice.</p>`}</div>`;
+  oe$("oeExploreDetail").innerHTML = `<div class="oe-inspector-head"><span class="oe-result-icon large">◇</span><div><h3>${oeEsc(entity.display_name || entity.identity_key || "Entity")}</h3><p>${oeEsc(typeLabel(entity.semantic_type))}</p>${badge(entity.identity_state || "canonical", entity.identity_state === "conflicted" ? "warn" : "neutral")}</div></div><div class="oe-inspector-proof"><span>Why OSI knows this object</span><strong>${Number(detail.presentation?.source_count || 0).toLocaleString()} source${Number(detail.presentation?.source_count || 0) === 1 ? "" : "s"} · ${Number(detail.presentation?.evidence_count || 0).toLocaleString()} evidence reference${Number(detail.presentation?.evidence_count || 0) === 1 ? "" : "s"}</strong><small>${oeEsc((entity.evidence_classes || []).join(" · ") || "Evidence class unknown")}</small></div><div class="oe-tabs"><button class="active" type="button">Overview</button><button type="button" disabled>Related (${Number(detail.presentation?.related_count || relations.length)})</button><button type="button" disabled>Evidence (${Number(detail.presentation?.evidence_count || 0)})</button></div><dl class="oe-inspector-facts"><div><dt>Canonical identity</dt><dd>${oeEsc(entity.identity_key || "—")}</dd></div><div><dt>Identity rule</dt><dd>${oeEsc(entity.identity_rule || "—")}</dd></div><div><dt>Observed</dt><dd>${oeEsc(relativeTime(entity.observed_at))}</dd></div><div><dt>Sources</dt><dd>${Number(detail.presentation?.source_count || 0).toLocaleString()}</dd></div><div><dt>Evidence classes</dt><dd>${oeEsc((entity.evidence_classes || []).join(", ") || "unknown")}</dd></div><div><dt>Relationships</dt><dd>${relations.length.toLocaleString()}</dd></div></dl>${properties.length ? `<div class="oe-inspector-section"><h4>Key properties</h4>${properties.map(([key, value]) => `<div class="oe-property-row"><span>${oeEsc(key)}</span><strong>${oeEsc(Array.isArray(value) ? value.join(", ") : typeof value === "object" ? JSON.stringify(value) : value)}</strong></div>`).join("")}</div>` : ""}<div class="oe-inspector-section"><h4>Related canonical entities</h4>${relations.slice(0, 6).map((relation) => `<div class="oe-property-row"><span>${oeEsc(relation.semantic_type)}</span><strong>${oeEsc(relation.source_entity_id === entity.entity_id ? relation.target_entity_id : relation.source_entity_id)}</strong></div>`).join("") || `<p>No relationships returned in this slice.</p>`}</div>`;
 }
 
 function investigationQueueMarkup() {
-  const total = oeState.investigationPage?.total;
-  return `<div class="oe-page-head"><div><h2>Investigations</h2><p>Choose one evidence-linked problem and carry only its relevant context forward.</p></div><button class="oe-button ghost" data-oe-refresh="investigations">Refresh</button></div><div class="oe-metrics oe-metrics-3">${metric("Open", oeState.investigationPublished ? Number(oeState.investigationCounts.open || 0).toLocaleString() : "Unknown", oeState.investigationPublished ? "Current findings" : "No operational evaluation", oeState.investigationPublished ? (Number(oeState.investigationCounts.open || 0) ? "danger" : "good") : "warn", "△")}${metric("Acknowledged", oeState.investigationPublished ? Number(oeState.investigationCounts.acknowledged || 0).toLocaleString() : "Unknown", oeState.investigationPublished ? "Still current" : "No operational evaluation", oeState.investigationPublished ? "info" : "warn", "●")}${metric("Review queue", oeState.investigationPublished ? Number(total || 0).toLocaleString() : "Unknown", oeState.investigationPublished ? "Paginated; nothing silently hidden" : "No current evaluation source", "neutral", "≡")}</div><section class="oe-panel"><div class="oe-section-head"><div><h3>Investigation queue</h3><p>Severity first, then recency.</p></div></div><div id="oeFindingQueue" class="oe-finding-queue"></div><div id="oeFindingLoadMore" class="oe-load-more"></div></section>`;
+  const total = oeState.situationPage?.total;
+  const counts = oeState.situationCounts || {};
+  return `<div class="oe-page-head"><div><h2>Investigations</h2><p>Review operational situations, not a wall of duplicate findings. Each situation keeps its rule mechanisms visible underneath.</p></div><button class="oe-button ghost" data-oe-refresh="investigations">Refresh</button></div><div class="oe-metrics oe-metrics-3">${metric("Attention situations", oeState.investigationPublished ? Number(total || 0).toLocaleString() : "Unknown", oeState.investigationPublished ? "Grouped by canonical object" : "No operational evaluation", oeState.investigationPublished ? (Number(total || 0) ? "danger" : "neutral") : "warn", "△")}${metric("Open findings", oeState.investigationPublished ? Number(counts.open_findings || 0).toLocaleString() : "Unknown", oeState.investigationPublished ? "Individual findings behind situations" : "No operational evaluation", "neutral", "•")}${metric("Acknowledged", oeState.investigationPublished ? Number(counts.acknowledged_findings || 0).toLocaleString() : "Unknown", oeState.investigationPublished ? "Still current" : "No operational evaluation", "neutral", "●")}</div><section class="oe-panel"><div class="oe-section-head"><div><h3>Situation queue</h3><p>Severity first, then recency. One row represents one canonical object with its current finding mechanisms.</p></div></div><div id="oeFindingQueue" class="oe-finding-queue"></div><div id="oeFindingLoadMore" class="oe-load-more"></div></section>`;
 }
 
 function renderFindingQueue() {
@@ -285,25 +317,28 @@ function renderFindingQueue() {
   if (!root) return;
   root.innerHTML = investigationQueueMarkup();
   if (!oeState.investigationPublished) {
-    oe$("oeFindingQueue").innerHTML = `<div class="oe-empty-state"><strong>Investigation queue is unknown</strong><p>No current operational evaluation source is published, so zero findings cannot be treated as an evaluated estate.</p></div>`;
+    oe$("oeFindingQueue").innerHTML = `<div class="oe-empty-state"><strong>Investigation queue is unknown</strong><p>No current operational evaluation source is published, so zero situations cannot be treated as an evaluated estate.</p></div>`;
     oe$("oeFindingLoadMore").innerHTML = "";
     return;
   }
-  oe$("oeFindingQueue").innerHTML = oeState.investigations.length ? oeState.investigations.map((finding) => `<button class="oe-finding-row" type="button" data-oe-finding="${oeEsc(finding.finding_id)}"><span>${badge(finding.severity || "info", tone(finding.severity))}</span><span><strong>${oeEsc(finding.display_name || finding.entity_id)}</strong><small>${oeEsc(finding.summary || finding.diagnosis || "Evidence-linked finding")}</small></span><span>${oeEsc(finding.status || "OPEN")}<small>${oeEsc(relativeTime(finding.last_seen))}</small></span><span>Focus →</span></button>`).join("") : `<div class="oe-empty-state"><strong>No current findings</strong><p>Absence of findings is bounded by the published operational evaluation coverage.</p></div>`;
-  oe$("oeFindingLoadMore").innerHTML = oeState.investigationPage?.next_offset != null ? `<button class="oe-button ghost" data-oe-load-findings>Load more findings</button>` : "";
+  oe$("oeFindingQueue").innerHTML = oeState.situations.length ? oeState.situations.map((situation) => {
+    const signals = situationSignals(situation);
+    return `<button class="oe-finding-row oe-situation-row" type="button" data-oe-situation="${oeEsc(situation.situation_key)}" data-oe-finding="${oeEsc(situation.focus_finding_id)}"><span>${badge(situation.severity || "info", tone(situation.severity))}</span><span><strong>${oeEsc(situation.display_name || situation.entity_id)}</strong><small>${oeEsc(signals.join(" · ") || "Current evidence-linked findings")}</small></span><span><strong>${Number(situation.finding_count || 0)} finding${Number(situation.finding_count || 0) === 1 ? "" : "s"}</strong><small>${oeEsc(relativeTime(situation.last_seen))}</small></span><span>Investigate →</span></button>`;
+  }).join("") : `<div class="oe-empty-state"><strong>No current situations</strong><p>Absence of situations is bounded by the published operational evaluation coverage.</p></div>`;
+  oe$("oeFindingLoadMore").innerHTML = oeState.situationPage?.next_offset != null ? `<button class="oe-button ghost" data-oe-load-findings>Load more situations</button>` : "";
 }
 
 async function loadInvestigations(reset = true) {
   if (oeState.investigationLoading) return;
   oeState.investigationLoading = true;
   try {
-    const offset = reset ? 0 : Number(oeState.investigationPage?.next_offset || 0);
-    const data = await oeApi(`/api/v2/operator/investigations?limit=20&offset=${offset}`);
-    if (reset) oeState.investigations = [];
-    const known = new Set(oeState.investigations.map((finding) => finding.finding_id));
-    for (const finding of data.items || []) if (!known.has(finding.finding_id)) oeState.investigations.push(finding);
-    oeState.investigationPage = data.page || { total: null, next_offset: null };
-    oeState.investigationCounts = data.counts || { open: null, acknowledged: null };
+    const offset = reset ? 0 : Number(oeState.situationPage?.next_offset || 0);
+    const data = await oeApi(`/api/v2/operator/situations?limit=20&offset=${offset}`);
+    if (reset) oeState.situations = [];
+    const known = new Set(oeState.situations.map((situation) => situation.situation_key));
+    for (const situation of data.items || []) if (!known.has(situation.situation_key)) oeState.situations.push(situation);
+    oeState.situationPage = data.page || { total: null, next_offset: null };
+    oeState.situationCounts = data.counts || { situations: null, open_findings: null, acknowledged_findings: null };
     oeState.investigationPublished = data.published === true;
     renderFindingQueue();
   } finally { oeState.investigationLoading = false; }
@@ -351,7 +386,7 @@ function renderFocusedInvestigation() {
   const finding = detail.finding;
   const relatedFindings = detail.related_findings || [];
   const tabs = [["overview", "Overview"], ["context", "Path context"], ["related", `Related findings (${relatedFindings.length})`], ["evidence", `Evidence (${Array.isArray(finding.evidence) ? finding.evidence.length : 0})`], ["notes", "Notes"]];
-  root.innerHTML = `<div class="oe-investigation-head"><div><button class="oe-link" data-oe-back-findings>← Back to findings</button><h2>Investigating: ${oeEsc(finding.display_name || finding.entity_id)}</h2><p>${oeEsc(finding.summary || finding.diagnosis || "Evidence-linked operational finding")}</p></div>${badge(finding.status || "OPEN", finding.status === "OPEN" ? "warn" : "info")}</div><div class="oe-tabs oe-investigation-tabs">${tabs.map(([key, label]) => `<button type="button" class="${oeState.focusedTab === key ? "active" : ""}" data-oe-investigation-tab="${key}">${oeEsc(label)}</button>`).join("")}</div><div id="oeInvestigationTabBody"></div>`;
+  root.innerHTML = `<div class="oe-investigation-head"><div><button class="oe-link" data-oe-back-findings>← Back to situations</button><h2>Investigating: ${oeEsc(finding.display_name || finding.entity_id)}</h2><p>${oeEsc(finding.summary || finding.diagnosis || "Evidence-linked operational finding")}</p></div>${badge(finding.status || "OPEN", finding.status === "OPEN" ? "warn" : "info")}</div><div class="oe-tabs oe-investigation-tabs">${tabs.map(([key, label]) => `<button type="button" class="${oeState.focusedTab === key ? "active" : ""}" data-oe-investigation-tab="${key}">${oeEsc(label)}</button>`).join("")}</div><div id="oeInvestigationTabBody"></div>`;
   renderInvestigationTab();
 }
 
@@ -365,12 +400,12 @@ function renderInvestigationTab() {
   if (oeState.focusedTab === "overview") {
     const checks = getChecks(finding.finding_id);
     const tasks = ["Review supporting evidence", "Inspect related canonical entities", "Confirm the coverage boundary", "Record working notes"];
-    body.innerHTML = `<div class="oe-investigation-grid"><section class="oe-panel"><div class="oe-section-head"><div><h3>Finding summary</h3><p>What is currently claimed and where it is anchored.</p></div><button class="oe-link" data-oe-inspect-entity="${oeEsc(finding.entity_id)}">View in Explore</button></div><div class="oe-investigation-copy"><strong>${oeEsc(finding.diagnosis || finding.summary || "No diagnosis supplied")}</strong><p>Entity: ${oeEsc(finding.entity_id)} · ${oeEsc(typeLabel(finding.semantic_type))}</p>${badge(finding.coverage_state || "unknown", tone(finding.coverage_state))}</div><div class="oe-key-questions"><h4>Key questions</h4><div><b>1</b><span>What evidence directly supports this finding?</span></div><div><b>2</b><span>Which related entities are operationally relevant?</span></div><div><b>3</b><span>Does the current coverage limit the conclusion?</span></div></div></section><section class="oe-panel"><div class="oe-section-head"><div><h3>Next steps</h3><p>Browser-session working checklist; not a persistent case record.</p></div></div><div class="oe-checklist">${tasks.map((task, index) => `<label><input type="checkbox" data-oe-check-index="${index}"${checks.includes(index) ? " checked" : ""}><span>${oeEsc(task)}</span></label>`).join("")}</div><div class="oe-note-box"><label>Working note <small>this browser session only</small><textarea id="oeInvestigationNote" placeholder="Add a note, observation, or hypothesis…">${oeEsc(getNote(finding.finding_id))}</textarea></label><button class="oe-button ghost" data-oe-save-note>Save session note</button></div></section><aside class="oe-panel"><div class="oe-section-head"><div><h3>Status</h3><p>Current finding state.</p></div></div>${statusBlock(finding)}<div class="oe-tag-box"><span>Tags</span>${badge(finding.semantic_type || "entity", "info")} ${badge(finding.coverage_state || "unknown", tone(finding.coverage_state))} ${badge(`${evidence.length} evidence refs`, "neutral")}</div></aside></div>`;
+    body.innerHTML = `<div class="oe-investigation-grid"><section class="oe-panel"><div class="oe-section-head"><div><h3>Finding summary</h3><p>This is the selected mechanism inside the broader object situation.</p></div><button class="oe-link" data-oe-inspect-entity="${oeEsc(finding.entity_id)}">View in Explore</button></div><div class="oe-investigation-copy"><strong>${oeEsc(finding.diagnosis || finding.summary || "No diagnosis supplied")}</strong><p>Entity: ${oeEsc(finding.entity_id)} · ${oeEsc(typeLabel(finding.semantic_type))}</p>${badge(finding.coverage_state || "unknown", tone(finding.coverage_state))}</div><div class="oe-key-questions"><h4>Key questions</h4><div><b>1</b><span>What evidence directly supports this mechanism?</span></div><div><b>2</b><span>What other current findings affect the same object?</span></div><div><b>3</b><span>Does the current coverage limit the conclusion?</span></div></div></section><section class="oe-panel"><div class="oe-section-head"><div><h3>Next steps</h3><p>Browser-session working checklist; not a persistent case record.</p></div></div><div class="oe-checklist">${tasks.map((task, index) => `<label><input type="checkbox" data-oe-check-index="${index}"${checks.includes(index) ? " checked" : ""}><span>${oeEsc(task)}</span></label>`).join("")}</div><div class="oe-note-box"><label>Working note <small>this browser session only</small><textarea id="oeInvestigationNote" placeholder="Add a note, observation, or hypothesis…">${oeEsc(getNote(finding.finding_id))}</textarea></label><button class="oe-button ghost" data-oe-save-note>Save session note</button></div></section><aside class="oe-panel"><div class="oe-section-head"><div><h3>Status</h3><p>Current finding state.</p></div></div>${statusBlock(finding)}<div class="oe-tag-box"><span>Tags</span>${badge(finding.semantic_type || "entity", "info")} ${badge(finding.coverage_state || "unknown", tone(finding.coverage_state))} ${badge(`${evidence.length} evidence refs`, "neutral")}</div></aside></div>`;
   } else if (oeState.focusedTab === "context") {
     const path = detail.path_context;
-    body.innerHTML = `<section class="oe-panel"><div class="oe-section-head"><div><h3>Path context</h3><p>Only canonical or qualified topology context is shown.</p></div></div>${path ? `<div class="oe-path-mini"><strong>${oeEsc(path.label)}</strong><p>Runtime boundary: ${oeEsc(path.runtime_boundary)} · Transfer completion: ${oeEsc(String(path.transfer_completion || "unknown").replaceAll("_", " "))}</p>${badge("Qualified", "good")}</div>` : `<div class="oe-empty-state"><strong>No qualified service path matched this finding</strong><p>The finding remains anchored to its canonical entity and related-entity references.</p></div>`}<div class="oe-related-ids">${related.map((id) => `<button class="oe-chip" data-oe-inspect-entity="${oeEsc(id)}">${oeEsc(id)}</button>`).join("")}</div></section>`;
+    body.innerHTML = `<section class="oe-panel"><div class="oe-section-head"><div><h3>Path context</h3><p>Only canonical or qualified topology context is shown.</p></div></div>${path ? `<div class="oe-path-mini"><strong>${oeEsc(path.label)}</strong><p>Runtime boundary: ${oeEsc(path.runtime_boundary)} · Transfer completion: ${oeEsc(String(path.transfer_completion || "unknown").replaceAll("_", " "))}</p>${badge("Qualified", "good")}</div>` : `<div class="oe-empty-state"><strong>No qualified operational path matched this finding</strong><p>The finding remains anchored to its canonical entity and related-entity references.</p></div>`}<div class="oe-related-ids">${related.map((id) => `<button class="oe-chip" data-oe-inspect-entity="${oeEsc(id)}">${oeEsc(id)}</button>`).join("")}</div></section>`;
   } else if (oeState.focusedTab === "related") {
-    body.innerHTML = `<section class="oe-panel"><div class="oe-section-head"><div><h3>Related findings</h3><p>Other current findings anchored to the same canonical entity.</p></div></div><div class="oe-rows">${(detail.related_findings || []).map((item) => `<button class="oe-context-row" data-oe-finding="${oeEsc(item.finding_id)}"><span><strong>${oeEsc(item.display_name || item.entity_id)}</strong><small>${oeEsc(item.summary || item.diagnosis || "Evidence-linked finding")}</small></span>${badge(item.severity || "info", tone(item.severity))}</button>`).join("") || `<div class="oe-empty-state"><p>No additional current findings are anchored to this entity.</p></div>`}</div></section>`;
+    body.innerHTML = `<section class="oe-panel"><div class="oe-section-head"><div><h3>Other mechanisms on this object</h3><p>Additional current findings anchored to the same canonical entity.</p></div></div><div class="oe-rows">${(detail.related_findings || []).map((item) => `<button class="oe-context-row" data-oe-finding="${oeEsc(item.finding_id)}"><span><strong>${oeEsc(item.summary || item.rule_id || "Evidence-linked finding")}</strong><small>${oeEsc(item.diagnosis || item.display_name || item.entity_id)}</small></span>${badge(item.severity || "info", tone(item.severity))}</button>`).join("") || `<div class="oe-empty-state"><p>No additional current findings are anchored to this entity.</p></div>`}</div></section>`;
   } else if (oeState.focusedTab === "evidence") {
     body.innerHTML = `<div class="oe-grid-2"><section class="oe-panel"><div class="oe-section-head"><div><h3>Evidence references</h3><p>Exact references supplied by the finding evaluation.</p></div></div><div class="oe-evidence-list">${evidence.map((item) => `<pre>${oeEsc(typeof item === "string" ? item : JSON.stringify(item, null, 2))}</pre>`).join("") || `<div class="oe-empty-state"><p>No evidence references supplied.</p></div>`}</div></section><section class="oe-panel"><div class="oe-section-head"><div><h3>Current occurrences</h3><p>Evaluation occurrences for this finding.</p></div></div><div class="oe-rows">${(detail.occurrences || []).map((occurrence) => `<div class="oe-context-row"><span><strong>${oeEsc(occurrence.source_id || occurrence.source_host || "evaluation source")}</strong><small>${oeEsc(relativeTime(occurrence.last_seen))} · ${oeEsc(occurrence.evaluation_revision_id || "")}</small></span>${badge("current", "good")}</div>`).join("")}</div></section></div>`;
   } else {
@@ -382,14 +417,12 @@ function renderCollection() {
   const data = oeState.collection;
   if (!data) return;
   const estate = data.estate || {};
-  const operations = data.operations || {};
   const telemetry = data.telemetry || {};
   oe$("oeCollectionMetrics").innerHTML = [
-    metric("Semantic sources", Number(data.sources?.current || 0).toLocaleString(), "Current source revisions", Number(data.sources?.current || 0) ? "good" : "warn", "▣"),
-    metric("Estate freshness", estate.fresh ? "Current" : "Stale", `${Number(estate.entities || 0).toLocaleString()} entities`, estate.fresh ? "good" : "danger", "●"),
-    metric("Operational findings", operations.published ? Number(operations.findings || 0).toLocaleString() : "Unknown", operations.published ? `${Number(operations.observations || 0).toLocaleString()} observations` : "No operational evaluation published", operations.published ? "info" : "warn", "◇"),
-    metric("Unresolved mappings", Number(estate.unresolved || 0).toLocaleString(), "Canonical references", Number(estate.unresolved || 0) ? "warn" : "good", "?"),
-    metric("Telemetry ingress", telemetry.ingress_enabled ? "Enabled" : "Disabled", telemetry.mode || "mode unknown", telemetry.ingress_enabled ? "good" : "neutral", "↯"),
+    metric("Semantic sources", Number(data.sources?.current || 0).toLocaleString(), "Current source revisions", Number(data.sources?.current || 0) ? "neutral" : "warn", "▣"),
+    metric("Estate freshness", estate.fresh ? "Current" : "Stale", `${Number(estate.entities || 0).toLocaleString()} canonical entities`, estate.fresh ? "neutral" : "danger", "●"),
+    metric("Unresolved mappings", Number(estate.unresolved || 0).toLocaleString(), "Canonical references limiting interpretation", Number(estate.unresolved || 0) ? "warn" : "neutral", "?"),
+    metric("Telemetry ingress", telemetry.ingress_enabled ? "Enabled" : "Disabled", telemetry.mode || "mode unknown", "neutral", "↯"),
   ].join("");
   const domains = data.domains || [];
   const max = Math.max(1, ...domains.map((item) => Number(item.count || 0)));
