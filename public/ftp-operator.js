@@ -49,8 +49,8 @@ function ensureFtpPanel() {
     <div class="ftp-operator-head">
       <div>
         <p class="section-kicker">File-transfer service paths</p>
-        <h2>Start with the path you care about</h2>
-        <p>OSI separates what is current, historical, inferred, and still unknown so operators can follow the supported path without mistaking topology for a completed transfer.</p>
+        <h2>Choose a path, then inspect only what matters</h2>
+        <p>Each path opens on demand. OSI keeps topology qualification, runtime corroboration, historical activity, mapping gaps and transfer completion as separate claims.</p>
       </div>
       <span class="route-mode-badge"><i></i>FTP · canonical estate</span>
     </div>
@@ -63,15 +63,12 @@ function ensureFtpPanel() {
         </div>
         <div id="ftpQualifiedRoutes" class="ftp-route-list"></div>
       </section>
-      <aside aria-labelledby="ftpGapsHeading">
-        <div class="ftp-subhead">
-          <div><p class="section-kicker">Attention</p><h3 id="ftpGapsHeading">Needs mapping</h3></div>
-          <span id="ftpGapCount"></span>
-        </div>
+      <details class="ftp-gaps-disclosure">
+        <summary><span><strong>Needs mapping</strong><small>Open only when you need unresolved FTP Site/listener mappings.</small></span><span id="ftpGapCount"></span></summary>
         <div id="ftpMappingGaps" class="ftp-gap-list"></div>
-      </aside>
+      </details>
     </div>
-    <div class="ftp-operator-footnote"><strong>How to read this:</strong> the path lane is an evidence-backed topology projection, not a transaction timeline. Use <em>Inspect route evidence</em> to prove the underlying claims in the canonical route workbench.</div>`;
+    <div class="ftp-operator-footnote"><strong>Interpretation boundary:</strong> a qualified path is an evidence-backed topology projection, not a live transaction trace. Use <em>Inspect route evidence</em> when you need proof.</div>`;
   workbench.parentNode.insertBefore(panel, workbench);
   return panel;
 }
@@ -146,7 +143,7 @@ function pathConnector(label) {
   return `<div class="ftp-path-connector" aria-hidden="true"><span></span><small>${ftpEscape(label)}</small><b>›</b></div>`;
 }
 
-function routeCard(trace, serverByKey) {
+function routeCard(trace, serverByKey, open = false) {
   const semantics = trace.semantics || {};
   const scope = routeScope(trace, serverByKey);
   const completion = semantics.transfer_completion || "unknown";
@@ -190,47 +187,51 @@ function routeCard(trace, serverByKey) {
     ),
   ];
 
-  return `<article class="ftp-route-card">
-    <div class="ftp-route-card-main">
-      <div>
-        <span class="ftp-route-kicker">Service path</span>
-        <strong>${ftpEscape(sourceName)}</strong>
-        <small>Destination · ${ftpEscape(targetName)}</small>
-      </div>
-      <div class="ftp-route-statuses">
-        ${evidenceTag(topologyLabel, "info", "The route is qualified by the normalization boundary but remains an inferred topology claim.")}
-        ${evidenceTag(runtimeBoundaryCurrent ? "Runtime boundary current" : "Runtime boundary incomplete", runtimeBoundaryCurrent ? "ok" : "warn")}
-        ${evidenceTag(completionLabel(completion), outcomeTone)}
-      </div>
-    </div>
+  return `<details class="ftp-route-card"${open ? " open" : ""}>
+    <summary class="ftp-route-summary">
+      <span class="ftp-route-card-main">
+        <span>
+          <span class="ftp-route-kicker">Service path</span>
+          <strong>${ftpEscape(sourceName)} <b aria-hidden="true">→</b> ${ftpEscape(targetName)}</strong>
+          <small>Open to inspect the supported path segments.</small>
+        </span>
+        <span class="ftp-route-statuses">
+          ${evidenceTag(topologyLabel, "info", "The route is qualified by the normalization boundary but remains an inferred topology claim.")}
+          ${evidenceTag(runtimeBoundaryCurrent ? "Runtime boundary current" : "Runtime boundary incomplete", runtimeBoundaryCurrent ? "ok" : "warn")}
+          ${evidenceTag(completionLabel(completion), outcomeTone)}
+        </span>
+      </span>
+    </summary>
 
-    <div class="ftp-path-lane" aria-label="Evidence-backed file-transfer path components">
-      ${nodes[0]}
-      ${pathConnector("maps to")}
-      ${nodes[1]}
-      ${pathConnector("corroborates")}
-      ${nodes[2]}
-      ${pathConnector("supports route to")}
-      ${nodes[3]}
-    </div>
+    <div class="ftp-route-detail">
+      <div class="ftp-path-lane" aria-label="Evidence-backed file-transfer path components">
+        ${nodes[0]}
+        ${pathConnector("maps to")}
+        ${nodes[1]}
+        ${pathConnector("corroborates")}
+        ${nodes[2]}
+        ${pathConnector("supports route to")}
+        ${nodes[3]}
+      </div>
 
-    <div class="ftp-route-actions">
-      <button type="button" class="secondary ftp-inspect-route" data-from="${ftpEscape(trace.source?.entity_id)}" data-to="${ftpEscape(trace.target?.entity_id)}">Inspect route evidence</button>
-      <details class="ftp-qualification-detail">
-        <summary>Why is this path qualified?</summary>
-        <div>
-          <dl>
-            <div><dt>Site activity</dt><dd>Historical observed evidence · ${ftpEscape(formatWindow(scope.siteAccess.activity_window_start, scope.siteAccess.activity_window_end))}</dd></div>
-            <div><dt>Listener</dt><dd>${hasCurrentListener ? "Current observed" : "Unknown"} · ${ftpEscape(scope.listener.endpoint || "No endpoint")}</dd></div>
-            <div><dt>PNC</dt><dd>${hasCurrentPnc ? "Current and independently corroborated" : "Not corroborated"} · ${ftpEscape(scope.pncEndpoint)}</dd></div>
-            <div><dt>Runtime sources</dt><dd>${ftpEscape(sourceKinds)}</dd></div>
-            <div><dt>Transfer outcome</dt><dd>${ftpEscape(completionLabel(completion))}</dd></div>
-          </dl>
-          <p>${ftpEscape(trace.explanation || "Route qualification and transfer outcome remain separate claims.")}</p>
-        </div>
-      </details>
+      <div class="ftp-route-actions">
+        <button type="button" class="secondary ftp-inspect-route" data-from="${ftpEscape(trace.source?.entity_id)}" data-to="${ftpEscape(trace.target?.entity_id)}">Inspect route evidence</button>
+        <details class="ftp-qualification-detail">
+          <summary>Why is this path qualified?</summary>
+          <div>
+            <dl>
+              <div><dt>Site activity</dt><dd>Historical observed evidence · ${ftpEscape(formatWindow(scope.siteAccess.activity_window_start, scope.siteAccess.activity_window_end))}</dd></div>
+              <div><dt>Listener</dt><dd>${hasCurrentListener ? "Current observed" : "Unknown"} · ${ftpEscape(scope.listener.endpoint || "No endpoint")}</dd></div>
+              <div><dt>PNC</dt><dd>${hasCurrentPnc ? "Current and independently corroborated" : "Not corroborated"} · ${ftpEscape(scope.pncEndpoint)}</dd></div>
+              <div><dt>Runtime sources</dt><dd>${ftpEscape(sourceKinds)}</dd></div>
+              <div><dt>Transfer outcome</dt><dd>${ftpEscape(completionLabel(completion))}</dd></div>
+            </dl>
+            <p>${ftpEscape(trace.explanation || "Route qualification and transfer outcome remain separate claims.")}</p>
+          </div>
+        </details>
+      </div>
     </div>
-  </article>`;
+  </details>`;
 }
 
 function gapCard(gap, endpointById) {
@@ -245,29 +246,35 @@ function gapCard(gap, endpointById) {
   </article>`;
 }
 
-function orientationMarkup({ traces, gaps, currentBoundary, completionSummary, servers }) {
+function orientationMarkup({ traces, gaps, currentBoundary, completionSummary }) {
   const allBoundaryCurrent = traces.length > 0 && currentBoundary === traces.length;
   const attention = gaps.length
-    ? `${gaps.length} Site${gaps.length === 1 ? "" : "s"} still need evidence-backed mapping`
-    : "No unresolved FTP Site/listener mappings";
-  return `<div class="ftp-orientation-summary">
+    ? `${gaps.length} mapping gap${gaps.length === 1 ? "" : "s"}`
+    : "no unresolved mappings";
+  return `<div class="ftp-orientation-strip">
     <div>
-      <span>Orient</span>
+      <span>Current picture</span>
       <strong>${traces.length} qualified path${traces.length === 1 ? "" : "s"} · ${attention}</strong>
-      <small>${allBoundaryCurrent ? "Every qualified path has a current listener and independently corroborated PNC boundary." : `${currentBoundary}/${traces.length || 0} qualified paths have a complete current runtime boundary.`}</small>
+      <small>${allBoundaryCurrent ? "All qualified paths have a current listener and independently corroborated PNC boundary." : `${currentBoundary}/${traces.length || 0} qualified paths have a complete current runtime boundary.`}</small>
     </div>
     <div class="ftp-orientation-outcome">
-      <span>Transaction outcome</span>
+      <span>Transfer completion</span>
       <strong>${ftpEscape(completionSummary)}</strong>
-      <small>Route qualification never substitutes for transfer completion evidence.</small>
+      <small>Outcome evidence remains independent from topology qualification.</small>
     </div>
-  </div>
-  <div class="ftp-orientation-facts">
-    <div><span>Qualified paths</span><strong>${traces.length.toLocaleString()}</strong></div>
-    <div><span>Current runtime boundary</span><strong>${currentBoundary}/${traces.length || 0}</strong></div>
-    <div><span>Needs mapping</span><strong>${gaps.length.toLocaleString()}</strong></div>
-    <div><span>FTP servers in estate</span><strong>${servers.length.toLocaleString()}</strong></div>
   </div>`;
+}
+
+function bindRouteDisclosures(routesNode) {
+  const cards = [...(routesNode?.querySelectorAll(".ftp-route-card") || [])];
+  cards.forEach((card) => {
+    card.addEventListener("toggle", () => {
+      if (!card.open) return;
+      cards.forEach((other) => {
+        if (other !== card) other.open = false;
+      });
+    });
+  });
 }
 
 async function loadFtpOperator() {
@@ -340,19 +347,19 @@ async function loadFtpOperator() {
         gaps,
         currentBoundary,
         completionSummary,
-        servers,
       });
     }
 
     const routeCount = document.getElementById("ftpRouteCount");
     const gapCount = document.getElementById("ftpGapCount");
-    if (routeCount) routeCount.textContent = `${traces.length} path${traces.length === 1 ? "" : "s"}`;
+    if (routeCount) routeCount.textContent = `${traces.length} available`;
     if (gapCount) gapCount.textContent = `${gaps.length} gap${gaps.length === 1 ? "" : "s"}`;
 
     if (routesNode) {
       routesNode.innerHTML = traces.length
-        ? traces.map((trace) => routeCard(trace, serverByKey)).join("")
+        ? traces.map((trace, index) => routeCard(trace, serverByKey, index === 0)).join("")
         : `<div class="ftp-empty">No evidence-qualified FTP service paths are present in the current canonical estate.</div>`;
+      bindRouteDisclosures(routesNode);
     }
 
     if (gapsNode) {
