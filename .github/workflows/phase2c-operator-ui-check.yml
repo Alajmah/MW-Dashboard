@@ -37,12 +37,16 @@ jobs:
       - name: Check browser module syntax
         run: node --check public/operational-intelligence.js
 
-      - name: Verify shell wiring and API projection
+      - name: Verify lazy forensic wiring and API projection
         shell: bash
         run: |
           set -euo pipefail
-          grep -Fq 'operational-intelligence.js' public/shell.js
-          grep -Fq 'osiRefreshOperationalIntelligence' public/shell.js
+          grep -Fq 'async function ensureForensicSupport()' public/shell.js
+          grep -Fq 'import(`/operational-intelligence.js?v=${UI_ASSET_REVISION}`)' public/shell.js
+          if grep -Fq 'import "/operational-intelligence.js?v=' public/shell.js; then
+            echo 'Operational intelligence must not be eagerly loaded by the primary operator shell.' >&2
+            exit 1
+          fi
           grep -Fq '/api/v2/operations/status' public/operational-intelligence.js
           grep -Fq '/api/v2/findings/current' public/operational-intelligence.js
           grep -Fq '/api/v2/operations/current/observations' public/operational-intelligence.js
