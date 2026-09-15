@@ -255,7 +255,6 @@ function captureInspectionChange(event) {
 }
 
 function applyTaskFirstStructure() {
-  document.body.classList.add("task-first-mode");
   taskFirstStyles();
   replacePrimaryNavigation();
   refineGlobalSearch();
