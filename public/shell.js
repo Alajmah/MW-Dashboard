@@ -15,10 +15,10 @@ import "/phase2g-investigation-clarity.js?v=20260911-1";
 import "/phase2h-topology-impact.js?v=20260911-1";
 import "/administration-ops.js?v=20260911-1";
 import "/phase2o-demo-manual-mode.js?v=20260912-1";
-import "/ftp-operator.js?v=20260915-1";
-import "/task-first-shell.js?v=20260915-2";
+import "/ftp-operator.js?v=20260915-2";
+import "/task-first-shell.js?v=20260915-3";
 
-const UI_ASSET_REVISION = "20260915-2";
+const UI_ASSET_REVISION = "20260915-3";
 
 // Compatibility marker retained for the pre-task-first product-shell contract:
 // inventory: ["Objects"

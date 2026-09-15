@@ -1,4 +1,4 @@
-const TASK_FIRST_UI_REVISION = "20260915-2";
+const TASK_FIRST_UI_REVISION = "20260915-3";
 
 const taskState = {
   findings: [],
@@ -40,35 +40,32 @@ function replacePrimaryNavigation() {
   if (brandSubtitle) brandSubtitle.textContent = "Operational Intelligence";
 }
 
-function ensureGlobalSearch() {
-  const topbar = document.querySelector(".topbar");
-  const actions = topbar?.querySelector(".top-actions");
-  if (!topbar || !actions || tq("taskGlobalSearch")) return;
-  const form = document.createElement("form");
-  form.className = "task-global-search";
-  form.setAttribute("role", "search");
-  form.innerHTML = `
-    <label for="taskGlobalSearch">Find anything</label>
-    <div><span aria-hidden="true">⌕</span><input id="taskGlobalSearch" type="search" autocomplete="off" placeholder="Search services, paths, objects…" /></div>`;
-  topbar.insertBefore(form, actions);
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const query = tq("taskGlobalSearch")?.value?.trim() || "";
-    if (!query) return;
-    window.osiNavigateProduct?.("inventory");
-    setTimeout(() => {
-      const input = tq("inventorySearch");
-      if (!input) return;
-      input.value = query;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.focus();
-    }, 80);
-  });
+function refineGlobalSearch() {
+  document.querySelector(".task-global-search")?.remove();
+  const input = tq("globalSemanticSearch");
+  if (!input) return;
+  input.placeholder = "Search objects, services, hosts, queues…";
+  input.setAttribute("aria-label", "Search canonical estate");
+  input.title = "Search canonical estate (/)";
+}
+
+function ensureOperationsAttentionLink() {
+  const head = tq("operationalAttention")?.querySelector(".operational-attention-head");
+  if (!head || head.querySelector(".task-attention-link")) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "ghost task-attention-link";
+  button.dataset.go = "investigations";
+  button.textContent = "Review all findings";
+  head.appendChild(button);
 }
 
 function ensureOverviewTaskFrame() {
   const overview = tq("view-overview");
-  if (!overview || tq("taskEstateContext")) return;
+  if (!overview || tq("taskEstateContext")) {
+    ensureOperationsAttentionLink();
+    return;
+  }
 
   const start = document.createElement("section");
   start.id = "taskStartActions";
@@ -76,9 +73,9 @@ function ensureOverviewTaskFrame() {
   start.innerHTML = `
     <div><span>Start with the question</span><strong>What do you need to understand?</strong></div>
     <div class="task-start-buttons">
-      <button type="button" class="ghost" data-go="routes">Follow a path</button>
+      <button type="button" class="ghost" data-go="routes">Trace a path</button>
       <button type="button" class="ghost" data-go="inventory">Find an object</button>
-      <button type="button" class="ghost" data-go="investigations">Investigate attention</button>
+      <button type="button" class="ghost" data-go="investigations">Review findings</button>
     </div>`;
 
   const details = document.createElement("details");
@@ -95,30 +92,42 @@ function ensureOverviewTaskFrame() {
     tq("overviewQmgrs")?.closest(".section-block"),
     tq("evidenceSummary")?.closest(".section-block"),
   ].filter(Boolean);
-  const unique = [...new Set(sections)];
-  unique.forEach((node) => body.appendChild(node));
+  [...new Set(sections)].forEach((node) => body.appendChild(node));
   overview.append(start, details);
   details.addEventListener("toggle", () => {
     const label = details.querySelector(".task-disclosure");
     if (label) label.textContent = details.open ? "Hide context" : "Show context";
   });
+  ensureOperationsAttentionLink();
+}
+
+function applyExploreDensity() {
+  const pageSize = tq("inventoryOwner");
+  if (!pageSize || pageSize.dataset.taskDensityApplied === "true") return;
+  if (![...pageSize.options].some((option) => option.value === "25")) return;
+  pageSize.dataset.taskDensityApplied = "true";
+  pageSize.value = "25";
+  pageSize.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
 function ensureExploreTaskFrame() {
   const view = tq("view-inventory");
   const toolbar = view?.querySelector(".inventory-toolbar");
-  if (!view || !toolbar || tq("taskExploreIntro")) return;
-  const intro = document.createElement("section");
-  intro.id = "taskExploreIntro";
-  intro.className = "task-explore-intro";
-  intro.innerHTML = `
-    <div><span>Search first</span><strong>Find the object you care about, then reveal its context.</strong><p>Physical hosts, middleware objects and applications remain available as focused views without occupying the primary navigation.</p></div>
-    <details><summary>Browse focused views</summary><div>
-      <button type="button" class="ghost" data-go="servers">Servers</button>
-      <button type="button" class="ghost" data-go="middleware">Middleware</button>
-      <button type="button" class="ghost" data-go="applications">Applications</button>
-    </div></details>`;
-  view.insertBefore(intro, toolbar);
+  if (!view || !toolbar) return;
+  if (!tq("taskExploreIntro")) {
+    const intro = document.createElement("section");
+    intro.id = "taskExploreIntro";
+    intro.className = "task-explore-intro";
+    intro.innerHTML = `
+      <div><span>Search first</span><strong>Find the object you care about, then reveal its context.</strong><p>Physical hosts, middleware objects and applications remain available as focused views without occupying the primary navigation.</p></div>
+      <details><summary>Browse focused views</summary><div>
+        <button type="button" class="ghost" data-go="servers">Servers</button>
+        <button type="button" class="ghost" data-go="middleware">Middleware</button>
+        <button type="button" class="ghost" data-go="applications">Applications</button>
+      </div></details>`;
+    view.insertBefore(intro, toolbar);
+  }
+  applyExploreDensity();
 }
 
 function ensureCollectionTaskFrame() {
@@ -290,13 +299,11 @@ async function refreshInvestigations(force = false) {
     const openCount = Number(open?.page?.total || 0);
     const ackCount = Number(acknowledged?.page?.total || 0);
     const gaps = Number(status.current_coverage_gaps || 0);
-    const sources = Number(status.current_sources || 0);
     const summary = tq("taskInvestigationSummary");
     if (summary) summary.innerHTML = `
       <div><span>Open</span><strong>${openCount.toLocaleString()}</strong></div>
       <div><span>Acknowledged</span><strong>${ackCount.toLocaleString()}</strong></div>
-      <div><span>Coverage gaps</span><strong>${gaps.toLocaleString()}</strong></div>
-      <div><span>Operational sources</span><strong>${sources.toLocaleString()}</strong></div>`;
+      <div><span>Coverage gaps</span><strong>${gaps.toLocaleString()}</strong></div>`;
     rows.innerHTML = taskState.findings.length
       ? taskState.findings.slice(0, 20).map(investigationRow).join("")
       : `<div class="task-empty"><strong>No unresolved findings in current operational evaluations</strong><span>This is bounded by published evidence coverage and does not imply that unobserved parts of the estate are healthy.</span></div>`;
@@ -329,16 +336,19 @@ async function refreshCollectionTrust() {
     const unresolved = Number(estate.unresolved_count || 0);
     const findings = Number(operationsStatus.current_findings || 0);
     const gaps = Number(operationsStatus.current_coverage_gaps || 0);
+    const operationalPublished = Number(operationsStatus.current_sources || 0) > 0;
     const metrics = tq("collectionTrustMetrics");
     metrics.innerHTML = [
       trustMetric("Semantic sources", sources.toLocaleString(), "Current source revisions", sources ? "current" : "unknown"),
       trustMetric("Canonical estate", fresh ? "Current" : "Stale", `${Number(estate.entity_count || 0).toLocaleString()} entities · ${Number(estate.relation_count || 0).toLocaleString()} relations`, fresh ? "current" : "attention"),
-      trustMetric("Operational evaluation", findings.toLocaleString(), "Current findings", operationsStatus.current_sources ? "current" : "unknown"),
-      trustMetric("Coverage gaps", gaps.toLocaleString(), "Partial / failed / not collected", gaps ? "attention" : "current"),
-      trustMetric("Telemetry ingress", telemetryStatus.ingress_enabled ? "Enabled" : "Disabled", telemetryStatus.mode || "mode unknown", telemetryStatus.ingress_enabled ? "current" : "neutral"),
+      trustMetric("Operational evidence", operationalPublished ? `${findings.toLocaleString()} findings` : "Unknown", operationalPublished ? "Current evaluation published" : "No current operational source", operationalPublished ? "current" : "unknown"),
+      trustMetric("Coverage gaps", operationalPublished ? gaps.toLocaleString() : "Unknown", operationalPublished ? "Partial / failed / not collected" : "No operational evaluation", gaps ? "attention" : operationalPublished ? "current" : "unknown"),
     ].join("");
     const note = tq("collectionTrustNote");
-    if (note) note.innerHTML = `<strong>Interpretation boundary:</strong> ${unresolved.toLocaleString()} canonical reference${unresolved === 1 ? " remains" : "s remain"} unresolved. Missing evidence stays unknown; current-source counts and a fresh estate do not convert unobserved runtime behavior into healthy state.`;
+    if (note) {
+      const telemetry = telemetryStatus.ingress_enabled ? `Telemetry ingress is enabled (${telemetryStatus.mode || "mode unknown"}).` : `Telemetry ingress is disabled (${telemetryStatus.mode || "mode unknown"}).`;
+      note.innerHTML = `<strong>Interpretation boundary:</strong> ${unresolved.toLocaleString()} canonical reference${unresolved === 1 ? " remains" : "s remain"} unresolved. ${tesc(telemetry)} Missing evidence stays unknown; current-source counts and a fresh estate do not convert unobserved runtime behavior into healthy state.`;
+    }
   } catch (error) {
     tq("collectionTrustMetrics").innerHTML = `<div class="task-empty error"><strong>Collection state unavailable</strong><span>${tesc(error instanceof Error ? error.message : String(error))}</span></div>`;
   } finally {
@@ -347,9 +357,10 @@ async function refreshCollectionTrust() {
 }
 
 function installTaskFirstShell() {
+  document.body.classList.add("task-first-mode");
   installTaskFirstStyles();
   replacePrimaryNavigation();
-  ensureGlobalSearch();
+  refineGlobalSearch();
   ensureOverviewTaskFrame();
   ensureExploreTaskFrame();
   ensureInvestigationView();
@@ -359,6 +370,7 @@ function installTaskFirstShell() {
 }
 
 window.osiRefreshTaskFirstUI = async (view) => {
+  refineGlobalSearch();
   if (view === "investigations") await refreshInvestigations();
   if (view === "snapshots") await refreshCollectionTrust();
   if (view === "overview") ensureOverviewTaskFrame();
