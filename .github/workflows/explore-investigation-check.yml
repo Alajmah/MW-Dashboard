@@ -49,9 +49,10 @@ jobs:
           combined = js + "\n" + boundary + "\n" + pivot + "\n" + pivot_css + "\n" + css + "\n" + shell
 
           required = [
-              'import "/explore-investigation.js?v=20260910-4"',
-              'import "/explore-boundary.js?v=20260910-4"',
-              'import "/explore-pivot.js?v=20260910-4"',
+              'async function ensureForensicSupport()',
+              'import(`/explore-investigation.js?v=${UI_ASSET_REVISION}`)',
+              'import(`/explore-boundary.js?v=${UI_ASSET_REVISION}`)',
+              'import(`/explore-pivot.js?v=${UI_ASSET_REVISION}`)',
               'Quick semantic scopes',
               'data-explore-scope',
               'history.replaceState',
@@ -93,6 +94,10 @@ jobs:
           missing = [item for item in required if item not in combined]
           if missing:
               raise SystemExit(f"Explore investigation contract missing: {missing}")
+
+          for eager in ('import "/explore-investigation.js?v=', 'import "/explore-boundary.js?v=', 'import "/explore-pivot.js?v='):
+              if eager in shell:
+                  raise SystemExit("Explore forensic layers must not be eagerly loaded by the primary operator shell")
 
           if '/api/v1/topology/current' in js or '/api/v1/topology/current' in boundary or '/api/v1/topology/current' in pivot:
               raise SystemExit("Explore investigation layers must remain canonical-only")
