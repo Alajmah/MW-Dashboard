@@ -3,6 +3,7 @@ import { handleCurrentObservations } from "./current-observations";
 import { importAuthorizationDenial } from "./import-auth";
 import { handleIntegratedRoutes } from "./integrated-routes";
 import { handleOperationalFindings } from "./operational-findings";
+import { handleMultiDomainOperatorPaths } from "./operator-path-domains";
 import { handleOperatorReadModel } from "./operator-read-model";
 import { handleSemanticEstate } from "./semantic-estate";
 import { handleSemanticEstateRead } from "./semantic-estate-read";
@@ -102,6 +103,17 @@ export default {
       ADMIN_IMPORT_TOKEN: env.ADMIN_IMPORT_TOKEN,
     });
     if (currentObservations) return currentObservations;
+
+    // The multi-domain path projection owns only the primary operator path
+    // surfaces. It reads existing qualified canonical relations and preserves
+    // each domain's evidence boundary without creating a new route ontology.
+    const multiDomainPaths = await handleMultiDomainOperatorPaths(request, {
+      DB: env.DB,
+      ADMIN_IMPORT_TOKEN: env.ADMIN_IMPORT_TOKEN,
+      TELEMETRY_INGEST_ENABLED: env.TELEMETRY_INGEST_ENABLED,
+      TELEMETRY_INGEST_KEYS_JSON: env.TELEMETRY_INGEST_KEYS_JSON,
+    });
+    if (multiDomainPaths) return multiDomainPaths;
 
     // The operator contract composes the canonical read models server-side so
     // public UI code renders task-ready projections instead of rebuilding
