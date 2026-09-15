@@ -1,0 +1,76 @@
+name: Shared inspection context check
+
+on:
+  pull_request:
+    paths:
+      - "public/task-first-shell.js"
+      - "public/task-first-shell.css"
+      - "public/shell.js"
+      - "docs/phase-operator-read-model.md"
+      - ".github/workflows/shared-inspection-context-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "public/task-first-shell.js"
+      - "public/task-first-shell.css"
+      - "public/shell.js"
+      - "docs/phase-operator-read-model.md"
+      - ".github/workflows/shared-inspection-context-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: JavaScript syntax
+        run: node --check public/task-first-shell.js && node --check public/shell.js
+
+      - name: Shared context contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          task = Path("public/task-first-shell.js").read_text()
+          css = Path("public/task-first-shell.css").read_text()
+          shell = Path("public/shell.js").read_text()
+          doc = Path("docs/phase-operator-read-model.md").read_text()
+          combined = task + "\n" + css + "\n" + shell + "\n" + doc
+
+          required = [
+              'import "/task-first-shell.js?v=20260915-5"',
+              'osi.inspection.context.v1',
+              'sessionStorage',
+              'data-task-context-jump',
+              'data-task-context-clear',
+              'data-oe-finding',
+              'data-oe-inspect-entity',
+              'oePathSelect',
+              'window.osiNavigateProduct',
+              'Session focus; availability is revalidated when opened. This navigation state is not evidence.',
+              'Shared inspection context',
+              'does not create a relationship between anchors',
+              '.task-inspection-context',
+              '.task-context-jump',
+          ]
+          missing = [item for item in required if item not in combined]
+          if missing:
+              raise SystemExit(f"shared inspection context contract missing: {missing}")
+
+          if 'fetch(' in task:
+              raise SystemExit("task-first shell shared context must not fetch operator data")
+          if 'localStorage' in task:
+              raise SystemExit("shared inspection context must remain browser-session scoped")
+          if 'Math.random' in task:
+              raise SystemExit("shared inspection context must remain deterministic")
+          if css.count('{') != css.count('}'):
+              raise SystemExit("task-first-shell.css has unbalanced braces")
+          if 'url(http://' in css or 'url(https://' in css or '@import url(' in css:
+              raise SystemExit("shared inspection context must not depend on external visual assets")
+
+          print("Shared inspection context contract OK")
