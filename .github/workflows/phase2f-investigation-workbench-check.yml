@@ -36,9 +36,14 @@ jobs:
           node --check public/phase2f-investigation-bootstrap.js
           node --check public/shell.js
 
-      - name: Verify shell integration
+      - name: Verify lazy shell integration
         run: |
-          grep -Fq 'import "/phase2f-investigation-bootstrap.js?v=' public/shell.js
+          grep -Fq 'async function ensureForensicSupport()' public/shell.js
+          grep -Fq 'import(`/phase2f-investigation-bootstrap.js?v=${UI_ASSET_REVISION}`)' public/shell.js
+          if grep -Fq 'import "/phase2f-investigation-bootstrap.js?v=' public/shell.js; then
+            echo 'Investigation bootstrap must not be eagerly loaded by the primary operator shell.' >&2
+            exit 1
+          fi
           grep -Fq 'import "/phase2f-investigation-workbench.js?v=' public/phase2f-investigation-bootstrap.js
 
       - name: Verify direct investigation path

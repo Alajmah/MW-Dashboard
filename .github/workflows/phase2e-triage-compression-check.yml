@@ -31,10 +31,14 @@ jobs:
       - name: JavaScript syntax
         run: node --check public/phase2e-triage-compression.js && node --check public/shell.js
 
-      - name: Verify shell integration
+      - name: Verify lazy forensic wiring
         run: |
-          grep -Fq 'import "/phase2e-triage-compression.js?v=' public/shell.js
-          grep -Fq 'window.osiRefreshTriageCompression?.();' public/shell.js
+          grep -Fq 'async function ensureForensicSupport()' public/shell.js
+          grep -Fq 'import(`/phase2e-triage-compression.js?v=${UI_ASSET_REVISION}`)' public/shell.js
+          if grep -Fq 'import "/phase2e-triage-compression.js?v=' public/shell.js; then
+            echo 'Phase 2E must not be eagerly loaded by the primary operator shell.' >&2
+            exit 1
+          fi
 
       - name: Verify triage semantics
         run: |

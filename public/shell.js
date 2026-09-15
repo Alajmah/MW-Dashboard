@@ -1,25 +1,8 @@
 import "/product-shell.js?v=20260910-1";
-import "/canonical-ops.js?v=20260910-4";
-import "/acceptance-ui.js?v=20260910-4";
-import "/explore-investigation.js?v=20260910-4";
-import "/explore-boundary.js?v=20260910-4";
-import "/explore-pivot.js?v=20260910-4";
-import "/workstation-ui.js?v=20260910-1";
-import "/wave1-shell-cleanup.js?v=20260910-1";
-import "/phase2i-overview-read-broker.js?v=20260911-1";
-import "/operational-intelligence.js?v=20260910-1";
-import "/phase2d-evidence-semantics.js?v=20260911-1";
-import "/phase2e-triage-compression.js?v=20260911-1";
-import "/phase2f-investigation-bootstrap.js?v=20260911-1";
-import "/phase2g-investigation-clarity.js?v=20260911-1";
-import "/phase2h-topology-impact.js?v=20260911-1";
-import "/administration-ops.js?v=20260911-1";
-import "/phase2o-demo-manual-mode.js?v=20260912-1";
-import "/ftp-operator.js?v=20260915-2";
-import "/task-first-shell.js?v=20260915-3";
+import "/task-first-shell.js?v=20260915-4";
 import "/operator-experience.js?v=20260915-3";
 
-const UI_ASSET_REVISION = "20260915-5";
+const UI_ASSET_REVISION = "20260915-6";
 
 // Compatibility marker retained for the pre-task-first product-shell contract:
 // inventory: ["Objects"
@@ -36,8 +19,11 @@ const shellCopy = {
   administration: ["Administration", "Manual OSI evidence handoff for the demo: topology and operational evaluations arrive as transferred artifacts; no direct middleware connection is required."],
 };
 
+const primaryViews = new Set(["overview", "routes", "inventory", "investigations", "snapshots"]);
 let legacyPromise = null;
-let canonicalRoutesPromise = null;
+let forensicPromise = null;
+let routeToolsPromise = null;
+let administrationPromise = null;
 
 function shellSetView(view) {
   document.querySelectorAll("[data-view-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.viewPanel === view));
@@ -47,15 +33,8 @@ function shellSetView(view) {
   const subtitle = document.getElementById("pageSubtitle");
   if (title) title.textContent = copy[0];
   if (subtitle) subtitle.textContent = copy[1];
-  window.osiApplyCanonicalShell?.();
-  window.osiRefreshWorkstationUI?.();
-  window.osiProductShellRefresh?.();
-  window.osiRefreshOperationalIntelligence?.();
-  window.osiRefreshEvidenceSemantics?.();
-  window.osiRefreshTriageCompression?.();
   window.osiRefreshTaskFirstUI?.(view);
-  window.osiRefreshOperatorExperience?.(view);
-  if (view === "administration") window.osiRenderAdministrationOps?.();
+  if (primaryViews.has(view)) window.osiRefreshOperatorExperience?.(view);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -69,114 +48,130 @@ async function ensureLegacy() {
   await legacyPromise;
 }
 
-async function ensureCanonicalRoutes() {
-  if (!canonicalRoutesPromise) {
-    canonicalRoutesPromise = import(`/routes-estate.js?v=${UI_ASSET_REVISION}`).catch((error) => {
-      canonicalRoutesPromise = null;
+async function ensureForensicSupport() {
+  if (!forensicPromise) {
+    forensicPromise = Promise.all([
+      import(`/canonical-ops.js?v=${UI_ASSET_REVISION}`),
+      import(`/acceptance-ui.js?v=${UI_ASSET_REVISION}`),
+      import(`/explore-investigation.js?v=${UI_ASSET_REVISION}`),
+      import(`/explore-boundary.js?v=${UI_ASSET_REVISION}`),
+      import(`/explore-pivot.js?v=${UI_ASSET_REVISION}`),
+      import(`/workstation-ui.js?v=${UI_ASSET_REVISION}`),
+      import(`/wave1-shell-cleanup.js?v=${UI_ASSET_REVISION}`),
+      import(`/phase2i-overview-read-broker.js?v=${UI_ASSET_REVISION}`),
+      import(`/operational-intelligence.js?v=${UI_ASSET_REVISION}`),
+      import(`/phase2d-evidence-semantics.js?v=${UI_ASSET_REVISION}`),
+      import(`/phase2e-triage-compression.js?v=${UI_ASSET_REVISION}`),
+      import(`/phase2f-investigation-bootstrap.js?v=${UI_ASSET_REVISION}`),
+      import(`/phase2g-investigation-clarity.js?v=${UI_ASSET_REVISION}`),
+      import(`/phase2h-topology-impact.js?v=${UI_ASSET_REVISION}`),
+      import(`/phase2o-demo-manual-mode.js?v=${UI_ASSET_REVISION}`),
+    ]).catch((error) => {
+      forensicPromise = null;
       throw error;
     });
   }
-  await canonicalRoutesPromise;
+  await forensicPromise;
 }
 
-function legacyView(view) {
-  return ["middleware", "applications", "snapshots"].includes(view);
+async function ensureRouteTools() {
+  if (!routeToolsPromise) {
+    routeToolsPromise = Promise.all([
+      import(`/routes-estate.js?v=${UI_ASSET_REVISION}`),
+      import(`/ftp-operator.js?v=${UI_ASSET_REVISION}`),
+    ]).catch((error) => {
+      routeToolsPromise = null;
+      throw error;
+    });
+  }
+  await routeToolsPromise;
+}
+
+async function ensureAdministration() {
+  if (!administrationPromise) {
+    administrationPromise = Promise.all([
+      import(`/administration-ops.js?v=${UI_ASSET_REVISION}`),
+      import(`/phase2o-demo-manual-mode.js?v=${UI_ASSET_REVISION}`),
+    ]).catch((error) => {
+      administrationPromise = null;
+      throw error;
+    });
+  }
+  await administrationPromise;
+}
+
+function showLoadError(view, error) {
+  const message = document.getElementById("globalMessage");
+  if (!message) return;
+  message.hidden = false;
+  message.className = "global-message error";
+  const source = view === "routes" ? "Advanced path tools" : view === "administration" ? "Administration" : "Forensic view";
+  message.textContent = `${source} failed to load: ${error instanceof Error ? error.message : String(error)}`;
 }
 
 async function navigate(view) {
   shellSetView(view);
   try {
-    if (view === "routes") {
-      await ensureCanonicalRoutes();
-      await window.osiRefreshFtpOperator?.();
-      return;
-    }
-    if (view === "investigations") {
-      await window.osiRefreshTaskFirstUI?.("investigations");
-      return;
-    }
-    if (view === "servers") {
-      await window.osiRenderCanonicalServers?.();
-      return;
-    }
-    if (view === "qmgrs") {
-      await window.osiRenderQueueManagers?.();
-      return;
-    }
-    if (view === "inventory") {
-      await window.osiRestoreCanonicalExploreControls?.();
-      window.osiProductShellRefresh?.();
-      window.osiRefreshOperationalIntelligence?.();
-      window.osiRefreshEvidenceSemantics?.();
-      window.osiRefreshTriageCompression?.();
-      window.osiRefreshTaskFirstUI?.("inventory");
-      return;
-    }
+    if (primaryViews.has(view)) return;
     if (view === "administration") {
+      await ensureAdministration();
       window.osiRenderAdministrationOps?.();
       return;
     }
-    if (legacyView(view)) {
-      await ensureLegacy();
+    if (view === "servers" || view === "qmgrs") {
+      await ensureForensicSupport();
+      if (view === "servers") await window.osiRenderCanonicalServers?.();
+      if (view === "qmgrs") await window.osiRenderQueueManagers?.();
+      return;
+    }
+    if (view === "middleware" || view === "applications") {
+      await Promise.all([ensureLegacy(), ensureForensicSupport()]);
       window.osiApplyCanonicalShell?.();
       window.osiProductShellRefresh?.();
-      if (view === "snapshots") await window.osiRefreshTaskFirstUI?.("snapshots");
     }
   } catch (error) {
-    const message = document.getElementById("globalMessage");
-    if (message) {
-      message.hidden = false;
-      message.className = "global-message error";
-      const source = view === "routes" ? "Canonical path" : view === "investigations" ? "Investigation" : view === "servers" ? "Canonical server" : view === "qmgrs" ? "Canonical queue manager" : view === "administration" ? "Administration" : view === "snapshots" ? "Collection" : "Legacy view";
-      message.textContent = `${source} failed to load: ${error instanceof Error ? error.message : String(error)}`;
-    }
+    showLoadError(view, error);
   }
 }
 
-document.querySelectorAll("[data-view]").forEach((button) => {
-  button.addEventListener("click", () => navigate(button.dataset.view));
-});
-document.querySelectorAll("[data-go]").forEach((button) => {
-  button.addEventListener("click", () => navigate(button.dataset.go));
-});
-document.getElementById("jumpInventory")?.addEventListener("click", () => navigate("inventory"));
-
 // Route-picker acceptance invariant: Focus alone never reopens cached results.
-// This document-level listener runs after any later direct listeners installed by
-// the legacy module, so canonical screens remain authoritative even after a legacy
-// module has been loaded during the same browser session.
+// Primary operator screens use bounded /api/v2/operator/* projections. Older
+// engineering modules are loaded only when an operator explicitly asks for a
+// forensic view, advanced trace, collection history, or administration.
 document.addEventListener("click", (event) => {
-  const view = event.target.closest("[data-view]")?.dataset.view || event.target.closest("[data-go]")?.dataset.go;
-  if (["overview", "inventory", "routes", "investigations", "servers", "qmgrs", "administration", "snapshots"].includes(view)) {
-    shellSetView(view);
-    if (view === "servers") setTimeout(() => window.osiRenderCanonicalServers?.(), 0);
-    if (view === "qmgrs") setTimeout(() => window.osiRenderQueueManagers?.(), 0);
-    if (view === "overview") {
-      setTimeout(() => window.osiRenderQmgrLedger?.(), 0);
-      setTimeout(() => window.osiRefreshOperationalIntelligence?.(), 80);
-      setTimeout(() => window.osiRefreshEvidenceSemantics?.(), 220);
-      setTimeout(() => window.osiRefreshTriageCompression?.(), 360);
-      setTimeout(() => window.osiRefreshTaskFirstUI?.("overview"), 420);
-    }
-    if (view === "inventory") {
-      setTimeout(() => window.osiRestoreCanonicalExploreControls?.(), 0);
-      setTimeout(() => window.osiRestoreCanonicalExploreControls?.(), 120);
-      setTimeout(() => window.osiRefreshWorkstationUI?.(), 160);
-      setTimeout(() => window.osiProductShellRefresh?.(), 180);
-      setTimeout(() => window.osiRefreshOperationalIntelligence?.(), 200);
-      setTimeout(() => window.osiRefreshEvidenceSemantics?.(), 240);
-      setTimeout(() => window.osiRefreshTriageCompression?.(), 300);
-      setTimeout(() => window.osiRefreshTaskFirstUI?.("inventory"), 340);
-    }
-    if (view === "routes") {
-      setTimeout(() => window.osiRefreshWorkstationUI?.(), 120);
-      setTimeout(() => window.osiRefreshFtpOperator?.(), 220);
-    }
-    if (view === "investigations") setTimeout(() => window.osiRefreshTaskFirstUI?.("investigations"), 0);
-    if (view === "snapshots") setTimeout(() => window.osiRefreshTaskFirstUI?.("snapshots"), 120);
-    if (view === "administration") setTimeout(() => window.osiRenderAdministrationOps?.(), 0);
+  const nav = event.target.closest("[data-view]");
+  const go = event.target.closest("[data-go]");
+  const view = nav?.dataset.view || go?.dataset.go;
+  if (view) {
+    void navigate(view);
+    return;
+  }
+
+  if (event.target.closest("[data-oe-route-advanced]")) {
+    void ensureRouteTools()
+      .then(() => {
+        document.querySelector('[data-view-panel="routes"]')?.classList.add("oe-show-legacy-route");
+        window.osiRefreshFtpOperator?.();
+      })
+      .catch((error) => showLoadError("routes", error));
+    return;
+  }
+
+  if (event.target.closest("[data-oe-collection-history]")) {
+    void Promise.all([ensureLegacy(), ensureForensicSupport()])
+      .then(() => {
+        window.osiApplyCanonicalShell?.();
+        window.osiProductShellRefresh?.();
+      })
+      .catch((error) => showLoadError("snapshots", error));
   }
 });
 
+document.getElementById("jumpInventory")?.addEventListener("click", () => navigate("inventory"));
+
 window.osiNavigateProduct = navigate;
+window.osiLoadAdvancedRouteTools = ensureRouteTools;
+window.osiLoadForensicSupport = ensureForensicSupport;
+window.osiLoadLegacyCollection = async () => Promise.all([ensureLegacy(), ensureForensicSupport()]);
+
 shellSetView("overview");
