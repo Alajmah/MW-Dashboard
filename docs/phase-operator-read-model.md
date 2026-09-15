@@ -2,7 +2,7 @@
 
 ## Objective
 
-The primary operator experience must be a projection of server-side operational meaning, not a browser-side semantic engine. The public application layer is responsible for rendering, navigation, progressive disclosure, light interaction state, and browser-session working notes. Canonical identity, route qualification, evidence classification, unknown-state preservation, finding aggregation, and collection interpretation remain server-side concerns.
+The primary operator experience must be a projection of server-side operational meaning, not a browser-side semantic engine. The public application layer is responsible for rendering, navigation, progressive disclosure, light interaction state, and browser-session working notes. Canonical identity, route qualification, evidence classification, unknown-state preservation, finding aggregation, operational-situation projection, and collection interpretation remain server-side concerns.
 
 The target flow is:
 
@@ -18,23 +18,50 @@ The read-only operator contract is exposed under `/api/v2/operator/`:
 - `GET /api/v2/operator/paths`
 - `GET /api/v2/operator/explore`
 - `GET /api/v2/operator/explore/{entity_id}`
+- `GET /api/v2/operator/situations`
 - `GET /api/v2/operator/investigations`
 - `GET /api/v2/operator/investigations/{finding_id}`
 - `GET /api/v2/operator/collection`
 
 These endpoints compose existing canonical/domain handlers where possible. They do not introduce another source of truth and they do not add mutation capability.
 
+`/api/v2/operator/situations` is the primary operator queue. `/api/v2/operator/investigations` remains a finding-level compatibility/forensic projection so existing investigation and evidence workflows retain their exact finding identifiers.
+
 ## Semantic ownership
 
 The server-side operator read model owns the task-specific projection needed by the five operator workspaces:
 
-- **Operations**: operational publication state, ranked attention, qualified affected paths, and bounded knowledge limitations.
+- **Operations**: operational publication state, ranked operational situations, qualified affected paths, and bounded knowledge limitations.
 - **Paths**: route qualification, current runtime-boundary assessment, transfer outcome as an orthogonal claim, path-scoped unresolved mappings, and evidence-stage presentation data.
-- **Explore**: bounded canonical search, semantic-type facets, canonical entity detail, relationship counts, and evidence/source counts.
-- **Investigations**: a correctly paginated combined OPEN + ACKNOWLEDGED current-finding queue, focused finding detail, related findings, and bounded qualified-path context.
-- **Collection**: source count, canonical freshness, operational publication boundary, telemetry mode, domain volume rollup, and interpretation boundaries.
+- **Explore**: search-first canonical discovery, semantic-type entry points, bounded search results, canonical entity detail, relationship counts, and evidence/source counts.
+- **Investigations**: a correctly paginated operational-situation queue, focused finding detail, related findings on the same canonical object, and bounded qualified-path context.
+- **Collection**: source count, canonical freshness, unresolved mappings, telemetry mode, domain volume rollup, and interpretation boundaries. Finding and observation volume remain secondary evidence context rather than primary trust indicators.
 
-The browser no longer decides whether an unobserved estate is healthy, derives route qualification from generic relations, merges independently paginated finding-status lists, computes evidence-domain rollups, or matches investigation path context from a client-side route cache.
+The browser no longer decides whether an unobserved estate is healthy, derives route qualification from generic relations, groups findings into operator situations, merges independently paginated finding-status lists, computes evidence-domain rollups, or matches investigation path context from a client-side route cache.
+
+## Operational situation compression
+
+An **Operational situation** is a derived presentation grouping used to reduce repeated operator rows. It is not a new canonical entity, incident, case, temporal episode, causal diagnosis, or service identity.
+
+The current projection is deliberately conservative:
+
+- active OPEN and ACKNOWLEDGED findings are first reduced to their latest current occurrence;
+- findings are grouped by the existing canonical `entity_id` they are already anchored to;
+- the situation severity is represented by the strongest current finding on that object;
+- exact finding `rule_id` values are retained as mechanism buckets inside the situation rather than being collapsed into invented semantic categories;
+- all individual `finding_id` values remain available and independently evidence-backed;
+- a representative `focus_finding_id` is only a navigation anchor into the existing finding-detail workflow;
+- grouping two findings on the same canonical object does not assert that they share a root cause, causal mechanism, episode, or transaction.
+
+This means that two findings such as queue-depth growth and oldest-message aging may appear as one operator situation for the same queue while remaining two distinct operational claims underneath. The compression changes presentation and triage ergonomics; it does not change the evidence supporting either finding.
+
+Situation ordering is severity first and then recency. Pagination operates on situations, not individual findings, so one noisy object cannot consume several adjacent rows in the primary operator queue.
+
+## Explore entry mode
+
+Explore is search-first rather than a default inventory browser. When no search term or semantic-type filter is supplied, the operator endpoint returns an entry projection containing estate size and preferred semantic-type entry points but no arbitrary first page of canonical entities.
+
+The entity list is requested only after the operator narrows the task through search or a semantic type. This preserves the full canonical estate without forcing the operator to scan an essentially random slice of hundreds of objects.
 
 ## Public layer responsibilities
 
@@ -46,6 +73,8 @@ The browser no longer decides whether an unobserved estate is healthy, derives r
 - browser-session-only investigation checklist and notes;
 - explicit requests for bounded operator read models;
 - optional progressive disclosure into retained forensic/engineering views.
+
+It renders server-projected situations and does not group raw findings itself.
 
 `public/task-first-shell.js` owns the structural operator shell plus the shared inspection navigation context. Its responsibilities are limited to the five-item primary navigation, canonical-search affordance, investigation panel container, and session-scoped anchors for the finding, canonical entity, or path the operator is following. It does not fetch operational data, infer relationships, qualify routes, or derive operator meaning.
 
@@ -74,11 +103,12 @@ The context bar therefore communicates: *what the operator is following*, not *w
 This architecture does not change OSI's evidence contract.
 
 - Missing operational sources produce **Unknown**, not zero/healthy.
+- An operational situation is only a grouped view of existing findings; it is not additional evidence.
 - A qualified route is a topology claim, not proof of a message or file transaction.
 - Historical Site activity, current listener evidence, independently corroborated runtime connectivity, and transfer completion remain separate claims.
 - Unresolved mappings remain unresolved and are scoped to the path when presented in a path workspace.
 - Collection freshness means the current source set has been reconciled; it does not mean the middleware estate is healthy.
-- Existing canonical IDs, source observations, evidence classes, and finding provenance remain authoritative.
+- Existing canonical IDs, source observations, evidence classes, findings, and finding provenance remain authoritative.
 
 ## Compatibility boundary
 
